@@ -1,0 +1,11 @@
+// Zellaude example layout — plugin bar appears in every tab
+// Usage: zellij --layout layout.kdl
+
+layout {
+    default_tab_template {
+        pane size=1 borderless=true {
+            plugin location="file:~/.config/zellij/plugins/zellaude.wasm"
+        }
+        children
+    }
+}

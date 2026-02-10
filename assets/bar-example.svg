@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 28" font-family="'JetBrains Mono','Fira Code','Cascadia Code',monospace" font-size="16">
+  <style>
+    /* 2s flash burst (4 blinks × 250ms on/off) then 3s pause = 5s total
+       250ms = 5% of 5s */
+    @keyframes flash-bg {
+      0%,10%,20%,30%          { fill: #50501e }
+      5%,15%,25%,35%,40%,100% { fill: #504b6e }
+    }
+    @keyframes flash-warn {
+      0%,10%,20%,30%          { fill: #ffff50 }
+      5%,15%,25%,35%,40%,100% { fill: #ff3c3c }
+    }
+    @keyframes flash-txt {
+      0%,10%,20%,30%          { fill: #ffff50 }
+      5%,15%,25%,35%,40%,100% { fill: #78dcdc }
+    }
+    .fl-bg   { animation: flash-bg   5s steps(1) infinite }
+    .fl-warn { animation: flash-warn 5s steps(1) infinite }
+    .fl-txt  { animation: flash-txt  5s steps(1) infinite }
+  </style>
+
+  <!-- Bar background -->
+  <rect width="1020" height="28" fill="#1e1e2e"/>
+
+  <!-- Prefix: " Zellaude (hasty-ent) " -->
+  <rect x="0" y="0" width="210" height="28" fill="#3c3250"/>
+  <text x="10" y="20" fill="#fff" font-weight="bold">Zellaude (hasty-ent)</text>
+
+  <!-- Mode pill: " NORMAL " -->
+  <rect x="210" y="0" width="80" height="28" fill="#50c878"/>
+  <text x="220" y="20" fill="#1e1e2e" font-weight="bold">NORMAL</text>
+
+  <!-- Arrow: mode(#50c878) → tab1(#8c64c8) -->
+  <rect x="290" y="0" width="10" height="28" fill="#8c64c8"/>
+  <polygon points="290,0 300,14 290,28" fill="#50c878"/>
+
+  <!-- Tab 1 (active Claude, Tool⚡): death-star-api -->
+  <rect x="300" y="0" width="180" height="28" fill="#8c64c8"/>
+  <text x="310" y="20"><tspan fill="#ffaa32">⚡</tspan><tspan fill="#fff" font-weight="bold"> death-star-api</tspan></text>
+
+  <!-- Arrow: tab1(#8c64c8) → BAR_BG -->
+  <polygon points="480,0 490,14 480,28" fill="#8c64c8"/>
+
+  <!-- Arrow: BAR_BG → tab2(#504b6e) -->
+  <rect x="490" y="0" width="10" height="28" fill="#504b6e"/>
+  <polygon points="490,0 500,14 490,28" fill="#1e1e2e"/>
+
+  <!-- Tab 2 (inactive Claude, Thinking●): hal-9000 -->
+  <rect x="500" y="0" width="160" height="28" fill="#504b6e"/>
+  <text x="510" y="20"><tspan fill="#b48cff">●</tspan><tspan fill="#78dcdc"> hal-9000</tspan><tspan fill="#a5a0b4"> 45s</tspan></text>
+
+  <!-- Arrow: tab2(#504b6e) → BAR_BG -->
+  <polygon points="660,0 670,14 660,28" fill="#504b6e"/>
+
+  <!-- Arrow: BAR_BG → tab3 (flashing) -->
+  <rect x="670" y="0" width="10" height="28" class="fl-bg"/>
+  <polygon points="670,0 680,14 670,28" fill="#1e1e2e"/>
+
+  <!-- Tab 3 (inactive Claude, Waiting⚠ — flashing): yolo -->
+  <rect x="680" y="0" width="80" height="28" class="fl-bg"/>
+  <!-- Warning sign: filled triangle, hollow exclamation -->
+  <g>
+    <polygon points="696,7 688,21 704,21" class="fl-warn"/>
+    <line x1="696" y1="12.5" x2="696" y2="17" stroke="#1e1e2e" stroke-width="1.5" stroke-linecap="round"/>
+    <circle cx="696" cy="19" r="0.7" fill="none" stroke="#1e1e2e" stroke-width="1"/>
+  </g>
+  <text x="705" y="20"><tspan class="fl-txt" font-weight="bold">yolo</tspan></text>
+
+  <!-- Arrow: tab3 (flashing) → BAR_BG -->
+  <polygon points="760,0 770,14 760,28" class="fl-bg"/>
+
+  <!-- Arrow: BAR_BG → tab4(#504b6e) -->
+  <rect x="770" y="0" width="10" height="28" fill="#504b6e"/>
+  <polygon points="770,0 780,14 770,28" fill="#1e1e2e"/>
+
+  <!-- Tab 4 (inactive non-Claude): towel -->
+  <rect x="780" y="0" width="70" height="28" fill="#504b6e"/>
+  <text x="790" y="20" fill="#aaa5b9">towel</text>
+
+  <!-- Arrow: tab4(#504b6e) → BAR_BG -->
+  <polygon points="850,0 860,14 850,28" fill="#504b6e"/>
+
+  <!-- Arrow: BAR_BG → tab5(#504b6e) -->
+  <rect x="860" y="0" width="10" height="28" fill="#504b6e"/>
+  <polygon points="860,0 870,14 860,28" fill="#1e1e2e"/>
+
+  <!-- Tab 5 (inactive non-Claude): skynet -->
+  <rect x="870" y="0" width="80" height="28" fill="#504b6e"/>
+  <text x="880" y="20" fill="#aaa5b9">skynet</text>
+
+  <!-- Arrow: tab5(#504b6e) → BAR_BG -->
+  <polygon points="950,0 960,14 950,28" fill="#504b6e"/>
+
+  <!-- BAR_BG fill to end -->
+  <rect x="960" y="0" width="60" height="28" fill="#1e1e2e"/>
+</svg>
