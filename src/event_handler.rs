@@ -1,6 +1,4 @@
-use crate::state::{Activity, FlashMode, HookPayload, NotifyMode, SessionInfo, State};
-use std::collections::BTreeMap;
-use zellij_tile::prelude::*;
+use crate::state::{Activity, FlashMode, HookPayload, SessionInfo, State};
 
 pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
     // Capture env info for use in notifications
@@ -24,10 +22,10 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
         "PreToolUse" => {
             Activity::Tool(payload.tool_name.clone().unwrap_or_default())
         }
-        "PostToolUse" => Activity::Thinking,
+        "PostToolUse" | "PostToolUseFailure" => Activity::Thinking,
         "UserPromptSubmit" => Activity::Thinking,
         "PermissionRequest" => Activity::Waiting,
-        // Notification is informational — just refresh the timestamp, keep current activity
+        // Notification is informational — just refresh the timestamp, keep current activity.
         "Notification" => {
             if let Some(session) = state.sessions.get_mut(&payload.pane_id) {
                 session.last_event_ts = crate::state::unix_now();
@@ -71,27 +69,8 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
             }
             FlashMode::Off => {}
         }
-        let should_notify = match state.settings.notifications {
-            NotifyMode::Always => true,
-            NotifyMode::Unfocused => {
-                // Only notify if the pane is on a different tab
-                tab_index.map_or(true, |idx| state.active_tab_index != Some(idx))
-            }
-            NotifyMode::Never => false,
-        };
-        if should_notify {
-            let now = crate::state::unix_now();
-            let cooldown_key = tab_index.unwrap_or(usize::MAX) as u32;
-            let last = state.last_notify_ts.get(&cooldown_key).copied().unwrap_or(0);
-            if now.saturating_sub(last) >= 10 {
-                state.last_notify_ts.insert(cooldown_key, now);
-                let tab = tab_name.as_deref().unwrap_or("Claude Code");
-                let tool = payload.tool_name.as_deref().unwrap_or("");
-                let zj_session = state.zellij_session_name.as_deref().unwrap_or("");
-                let term = state.term_program.as_deref().unwrap_or("");
-                send_notification(tab, tool, payload.pane_id, zj_session, term);
-            }
-        }
+        // Desktop notification is handled by the hook script to avoid
+        // duplicates from multiple plugin instances.
     } else {
         state.flash_deadlines.remove(&payload.pane_id);
     }
@@ -108,49 +87,4 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
         session.tab_index = Some(idx);
         session.tab_name = Some(name);
     }
-}
-
-fn send_notification(
-    tab_name: &str,
-    tool_name: &str,
-    pane_id: u32,
-    zellij_session: &str,
-    term_program: &str,
-) {
-    let tool_suffix = if tool_name.is_empty() {
-        String::new()
-    } else {
-        format!(" — {tool_name}")
-    };
-    let title = format!("⚠ {tab_name}");
-    let message = format!("Permission requested{tool_suffix}");
-    // Escape single quotes for shell
-    let title_esc = title.replace('\'', "'\\''");
-    let message_esc = message.replace('\'', "'\\''");
-    let session_esc = zellij_session.replace('\'', "'\\''");
-    let term_esc = term_program.replace('\'', "'\\''");
-
-    // Click callback: activate terminal + pipe a focus request to the plugin
-    let activate = if term_program.is_empty() {
-        String::new()
-    } else {
-        format!("open -a '{term_esc}' && ")
-    };
-    let focus_cmd = format!(
-        "{activate}/opt/homebrew/bin/zellij -s '{session_esc}' pipe --name zellaude:focus -- {pane_id}"
-    );
-    let focus_esc = focus_cmd.replace('\'', "'\\''");
-
-    // terminal-notifier supports click-to-focus; fall back to osascript
-    let cmd = format!(
-        "if command -v terminal-notifier >/dev/null 2>&1; then \
-           terminal-notifier \
-             -title '{title_esc}' \
-             -message '{message_esc}' \
-             -execute '{focus_esc}'; \
-         else \
-           osascript -e 'display notification \"{message_esc}\" with title \"{title_esc}\"'; \
-         fi"
-    );
-    run_command(&["sh", "-c", &cmd], BTreeMap::new());
 }

@@ -41,7 +41,14 @@ impl ZellijPlugin for State {
     fn update(&mut self, event: Event) -> bool {
         match event {
             Event::TabUpdate(tabs) => {
-                self.active_tab_index = tabs.iter().find(|t| t.active).map(|t| t.position);
+                let new_active = tabs.iter().find(|t| t.active).map(|t| t.position);
+                if new_active != self.active_tab_index {
+                    // Tab focus changed — clear persist flashes on the newly focused tab
+                    if let Some(idx) = new_active {
+                        self.clear_flashes_on_tab(idx);
+                    }
+                }
+                self.active_tab_index = new_active;
                 self.tabs = tabs;
                 self.rebuild_pane_map();
                 true
@@ -252,6 +259,18 @@ impl State {
                 }
                 _ => {}
             }
+        }
+    }
+
+    fn clear_flashes_on_tab(&mut self, tab_idx: usize) {
+        let pane_ids: Vec<u32> = self
+            .sessions
+            .values()
+            .filter(|s| s.tab_index == Some(tab_idx))
+            .map(|s| s.pane_id)
+            .collect();
+        for pane_id in pane_ids {
+            self.flash_deadlines.remove(&pane_id);
         }
     }
 

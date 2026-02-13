@@ -27,7 +27,7 @@ HOOK_ENTRY=$(jq -nc --arg cmd "$HOOK_SCRIPT" '[{
   }]
 }]')
 
-EVENTS='["PreToolUse","PostToolUse","UserPromptSubmit","PermissionRequest","Notification","Stop","SubagentStop","SessionStart","SessionEnd"]'
+EVENTS='["PreToolUse","PostToolUse","PostToolUseFailure","UserPromptSubmit","PermissionRequest","Notification","Stop","SubagentStop","SessionStart","SessionEnd"]'
 
 uninstall() {
   if [ ! -f "$SETTINGS" ]; then

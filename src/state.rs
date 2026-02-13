@@ -151,8 +151,6 @@ pub struct State {
     pub click_regions: Vec<ClickRegion>,
     /// pane_id -> flash deadline in ms (for waiting animation)
     pub flash_deadlines: HashMap<u32, u64>,
-    /// pane_id -> last notification timestamp (for rate-limiting)
-    pub last_notify_ts: HashMap<u32, u64>,
     pub zellij_session_name: Option<String>,
     pub term_program: Option<String>,
     pub input_mode: InputMode,
