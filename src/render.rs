@@ -380,6 +380,12 @@ fn render_tabs(
                 }
             }
 
+            // Fullscreen indicator
+            if tab.is_fullscreen_active && *col + 3 < cols {
+                let _ = write!(buf, " {}F", fg(255, 200, 60));
+                *col += 2;
+            }
+
             // Trailing space
             let _ = write!(buf, " ");
             *col += 1;
@@ -416,6 +422,12 @@ fn render_tabs(
                 let bold_str = if name_bold { BOLD } else { "" };
                 let _ = write!(buf, "{bold_str}{name_fg}{truncated}{RESET}{tab_bg_str}");
                 *col += display_width(&truncated);
+            }
+
+            // Fullscreen indicator
+            if tab.is_fullscreen_active && *col + 3 < cols {
+                let _ = write!(buf, " {}F", fg(255, 200, 60));
+                *col += 2;
             }
 
             // Trailing space
