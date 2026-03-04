@@ -32,6 +32,7 @@ impl ZellijPlugin for State {
             EventType::RunCommandResult,
             EventType::PermissionRequestResult,
         ]);
+        set_selectable(false);
         set_timeout(TIMER_INTERVAL);
 
         // Load persisted settings (may be retried in PermissionRequestResult
