@@ -11,10 +11,21 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
 
     let event = payload.hook_event.as_str();
 
-    // SessionEnd → remove session
+    // SessionEnd → remove session (never drop: terminal cleanup)
     if event == "SessionEnd" {
         state.sessions.remove(&payload.pane_id);
         return;
+    }
+
+    // Drop events that arrive out of order (async hooks can race through
+    // parallel subprocesses). Only enforced when the hook supplied ts_ms —
+    // an absent field means an old hook script and is treated as fresh.
+    if let Some(ts_ms) = payload.ts_ms {
+        if let Some(session) = state.sessions.get(&payload.pane_id) {
+            if ts_ms < session.last_ts_ms {
+                return;
+            }
+        }
     }
 
     let activity = match event {
@@ -29,6 +40,9 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
         "Notification" => {
             if let Some(session) = state.sessions.get_mut(&payload.pane_id) {
                 session.last_event_ts = crate::state::unix_now();
+                if let Some(ts_ms) = payload.ts_ms {
+                    session.last_ts_ms = ts_ms;
+                }
             }
             return;
         }
@@ -54,6 +68,7 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
             tab_index: None,
             last_event_ts: 0,
             cwd: None,
+            last_ts_ms: 0,
         });
 
     if matches!(activity, Activity::Waiting) {
@@ -77,6 +92,9 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
 
     session.activity = activity;
     session.last_event_ts = crate::state::unix_now();
+    if let Some(ts_ms) = payload.ts_ms {
+        session.last_ts_ms = ts_ms;
+    }
     if let Some(sid) = &payload.session_id {
         session.session_id = sid.clone();
     }

@@ -41,6 +41,8 @@ pub struct SessionInfo {
     pub tab_index: Option<usize>,
     pub last_event_ts: u64,
     pub cwd: Option<String>,
+    #[serde(default)]
+    pub last_ts_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,6 +54,7 @@ pub struct HookPayload {
     pub cwd: Option<String>,
     pub zellij_session: Option<String>,
     pub term_program: Option<String>,
+    pub ts_ms: Option<u64>,
 }
 
 pub struct ClickRegion {
