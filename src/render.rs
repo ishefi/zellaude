@@ -46,7 +46,21 @@ fn bg(r: u8, g: u8, b: u8) -> String {
 }
 
 fn display_width(s: &str) -> usize {
-    s.chars().count()
+    s.chars()
+        .filter(|&c| c != '\u{FE0E}' && c != '\u{FE0F}')
+        .count()
+}
+
+const SYMBOL_CELL: usize = 2;
+
+fn symbol_visual_cols(s: &str) -> usize {
+    s.chars()
+        .map(|c| match c {
+            '\u{FE0E}' | '\u{FE0F}' => 0,
+            '⚡' | '⚙' | '▶' | '⚠' => 2,
+            _ => 1,
+        })
+        .sum()
 }
 
 const RESET: &str = "\x1b[0m";
@@ -236,11 +250,7 @@ fn render_tabs(
                 2
             } else {
                 let n = sessions.len();
-                let symbols_width: usize = sessions
-                    .iter()
-                    .map(|s| display_width(activity_style(&s.activity).symbol))
-                    .sum();
-                symbols_width + n + 1
+                SYMBOL_CELL * n + (n - 1) + 2
             }
         })
         .collect();
@@ -305,8 +315,13 @@ fn render_tabs(
                 };
 
                 let region_start = *col;
+                let visual = symbol_visual_cols(style.symbol);
+                let pad = SYMBOL_CELL.saturating_sub(visual);
                 let _ = write!(buf, "{tab_bg_str}{sym_fg}{}", style.symbol);
-                *col += display_width(style.symbol);
+                for _ in 0..pad {
+                    let _ = write!(buf, " ");
+                }
+                *col += SYMBOL_CELL;
 
                 state.click_regions.push(ClickRegion {
                     start_col: region_start,
