@@ -57,12 +57,15 @@ pub struct HookPayload {
     pub ts_ms: Option<u64>,
 }
 
+pub enum ClickAction {
+    FocusPane(u32),
+    SwitchTab(usize),
+}
+
 pub struct ClickRegion {
     pub start_col: usize,
     pub end_col: usize,
-    pub tab_index: usize,
-    pub pane_id: u32,
-    pub is_waiting: bool,
+    pub action: ClickAction,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
@@ -106,7 +109,6 @@ impl FlashMode {
 pub struct Settings {
     pub notifications: NotifyMode,
     pub flash: FlashMode,
-    pub elapsed_time: bool,
     pub mode_indicator: bool,
 }
 
@@ -115,7 +117,6 @@ impl Default for Settings {
         Self {
             notifications: NotifyMode::Always,
             flash: FlashMode::Once,
-            elapsed_time: true,
             mode_indicator: true,
         }
     }
@@ -132,7 +133,6 @@ pub enum ViewMode {
 pub enum SettingKey {
     Notifications,
     Flash,
-    ElapsedTime,
     ModeIndicator,
 }
 
