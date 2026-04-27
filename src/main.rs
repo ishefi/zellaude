@@ -356,7 +356,13 @@ impl State {
             let dominated = self
                 .sessions
                 .get(&pane_id)
-                .map(|existing| session.last_event_ts > existing.last_event_ts)
+                .map(|existing| {
+                    if session.last_ts_ms > 0 || existing.last_ts_ms > 0 {
+                        session.last_ts_ms > existing.last_ts_ms
+                    } else {
+                        session.last_event_ts > existing.last_event_ts
+                    }
+                })
                 .unwrap_or(true);
             if dominated {
                 // Refresh tab name from our local pane map

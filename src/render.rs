@@ -255,7 +255,7 @@ fn render_tabs(
 
     for (i, tab) in tabs.iter().enumerate() {
         let arrows_needed = if prev_bg == prefix_bg { 1 } else { 2 };
-        if *col + arrows_needed + 3 > cols {
+        if *col + arrows_needed + per_tab_fixed[i] + 1 > cols {
             break;
         }
 
@@ -308,32 +308,35 @@ fn render_tabs(
                 let _ = write!(buf, "{tab_bg_str}{sym_fg}{}", style.symbol);
                 *col += display_width(style.symbol);
 
-                if sym_idx + 1 < sessions.len() {
-                    let _ = write!(buf, "{tab_bg_str} ");
-                    *col += 1;
-                }
-
                 state.click_regions.push(ClickRegion {
                     start_col: region_start,
                     end_col: *col,
                     action: ClickAction::FocusPane(session.pane_id),
                 });
+
+                if sym_idx + 1 < sessions.len() {
+                    let _ = write!(buf, "{tab_bg_str} ");
+                    *col += 1;
+                }
             }
 
             let name_start = *col;
 
             if !truncated.is_empty() {
-                let (name_fg_str, name_bold) = if is_active {
-                    (fg(255, 255, 255), true)
-                } else {
-                    (fg(120, 220, 220), false)
-                };
-                let bold_str = if name_bold { BOLD } else { "" };
-                let _ = write!(
-                    buf,
-                    "{tab_bg_str} {bold_str}{name_fg_str}{truncated}{RESET}{tab_bg_str}"
-                );
-                *col += 1 + display_width(&truncated);
+                let needed = 1 + display_width(&truncated);
+                if cols.saturating_sub(*col) >= needed + 2 {
+                    let (name_fg_str, name_bold) = if is_active {
+                        (fg(255, 255, 255), true)
+                    } else {
+                        (fg(120, 220, 220), false)
+                    };
+                    let bold_str = if name_bold { BOLD } else { "" };
+                    let _ = write!(
+                        buf,
+                        "{tab_bg_str} {bold_str}{name_fg_str}{truncated}{RESET}{tab_bg_str}"
+                    );
+                    *col += needed;
+                }
             }
 
             if tab.is_fullscreen_active && *col + 3 < cols {
@@ -365,9 +368,12 @@ fn render_tabs(
             *col += 1;
 
             if !truncated.is_empty() {
-                let bold_str = if name_bold { BOLD } else { "" };
-                let _ = write!(buf, "{bold_str}{name_fg_str}{truncated}{RESET}{tab_bg_str}");
-                *col += display_width(&truncated);
+                let needed = display_width(&truncated);
+                if cols.saturating_sub(*col) >= needed + 2 {
+                    let bold_str = if name_bold { BOLD } else { "" };
+                    let _ = write!(buf, "{bold_str}{name_fg_str}{truncated}{RESET}{tab_bg_str}");
+                    *col += needed;
+                }
             }
 
             if tab.is_fullscreen_active && *col + 3 < cols {

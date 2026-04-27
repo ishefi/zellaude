@@ -8,12 +8,10 @@ A Zellij status bar plugin that replaces the default tab bar with Claude Code ac
 
 - **Full tab bar** — shows all Zellij tabs (not just Claude sessions), replacing the native tab bar
 - **Session & mode display** — shows the Zellij session name and current input mode (NORMAL, LOCKED, PANE, etc.) with color-coded indicators
-- **Live activity indicators** — see what every Claude Code session is doing at a glance; non-Claude tabs shown dimly
-- **Clickable tabs** — click any tab to switch to it
-- **Smart pane focus** — clicking a waiting (⚠) session focuses the exact pane so you can respond to the permission prompt immediately
-- **Permission flash** — sessions pulse bright yellow for 2 seconds when a permission request arrives
+- **Live activity indicators** — every Claude Code pane gets its own symbol slot in its tab, ordered stably so the layout doesn't reshuffle as activity changes; non-Claude tabs shown dimly
+- **Clickable tabs and panes** — click a tab name to switch to it; click any pane's symbol to focus that exact pane
+- **Permission flash** — the affected pane's symbol pulses bright yellow when a permission request arrives, without disturbing other panes in the same tab
 - **Desktop notifications** — macOS notification on permission requests (rate-limited to once per 10s per tab), with click-to-focus support via [terminal-notifier](https://github.com/julienXX/terminal-notifier)
-- **Elapsed time** — shows how long a session has been in its current state (after 30s), making it easy to spot stuck sessions
 - **Multi-instance sync** — all Zellij tabs show a unified view of all sessions
 
 ### Activity symbols
@@ -40,8 +38,8 @@ Click the **Zellaude** prefix on the left side of the bar to open the settings m
 | Setting | Options | Default | Description |
 |---------|---------|---------|-------------|
 | Notifications | Always / Unfocused / Off | Always | Desktop notifications on permission requests. "Unfocused" only notifies when the requesting pane is on a different tab. |
-| Flash | Persist / Brief / Off | Brief | Yellow flash on permission requests. "Persist" keeps flashing until resolved, "Brief" flashes for 2 seconds. |
-| Elapsed time | On / Off | On | Show time since last activity (appears after 30s). |
+| Flash | Persist / Brief / Off | Brief | Yellow symbol flash on permission requests. "Persist" keeps flashing until resolved, "Brief" flashes for 2 seconds. |
+| Mode indicator | On / Off | On | Show the current Zellij input mode (NORMAL, LOCKED, etc.) next to the session name. |
 
 ## Install
 
