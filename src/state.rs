@@ -32,6 +32,14 @@ pub enum Activity {
     Idle,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Agent {
+    #[default]
+    Claude,
+    Codex,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub session_id: String,
@@ -43,6 +51,8 @@ pub struct SessionInfo {
     pub cwd: Option<String>,
     #[serde(default)]
     pub last_ts_ms: u64,
+    #[serde(default)]
+    pub agent: Agent,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +65,8 @@ pub struct HookPayload {
     pub zellij_session: Option<String>,
     pub term_program: Option<String>,
     pub ts_ms: Option<u64>,
+    #[serde(default)]
+    pub agent: Agent,
 }
 
 pub struct ClickRegion {

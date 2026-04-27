@@ -1,6 +1,6 @@
 # Zellaude
 
-A Zellij status bar plugin that replaces the default tab bar with Claude Code activity awareness.
+A Zellij status bar plugin that replaces the default tab bar with Claude Code and Codex CLI activity awareness.
 
 ![Zellaude status bar example](assets/bar-example.svg)
 
@@ -8,7 +8,7 @@ A Zellij status bar plugin that replaces the default tab bar with Claude Code ac
 
 - **Full tab bar** — shows all Zellij tabs (not just Claude sessions), replacing the native tab bar
 - **Session & mode display** — shows the Zellij session name and current input mode (NORMAL, LOCKED, PANE, etc.) with color-coded indicators
-- **Live activity indicators** — see what every Claude Code session is doing at a glance; non-Claude tabs shown dimly
+- **Live activity indicators** — see what every Claude Code or Codex CLI session is doing at a glance; other tabs shown dimly
 - **Clickable tabs** — click any tab to switch to it
 - **Smart pane focus** — clicking a waiting (⚠) session focuses the exact pane so you can respond to the permission prompt immediately
 - **Permission flash** — sessions pulse bright yellow for 2 seconds when a permission request arrives
@@ -63,7 +63,7 @@ default_tab_template {
 }
 ```
 
-On first load, the plugin automatically installs the hook script and registers it with Claude Code. No cloning, no install scripts.
+On first load, the plugin automatically installs the hook script and registers it with Claude Code and Codex CLI when their config directories exist. No cloning, no install scripts.
 
 ### Build from source
 
@@ -114,11 +114,11 @@ Without it, notifications still appear via osascript but clicking them won't foc
 
 Two components:
 
-1. **WASM plugin** — runs inside Zellij, receives events, maintains state in memory, renders the status bar, sends desktop notifications. On first load, writes the hook script to `~/.config/zellij/plugins/zellaude-hook.sh` and registers it in `~/.claude/settings.json`.
-2. **Hook script** — a thin bash bridge that forwards Claude Code hook events to the plugin via `zellij pipe`
+1. **WASM plugin** — runs inside Zellij, receives events, maintains state in memory, renders the status bar, sends desktop notifications. On first load, writes the hook script to `~/.config/zellij/plugins/zellaude-hook.sh` and registers it in `~/.claude/settings.json` and `~/.codex/hooks.json` when available.
+2. **Hook script** — a thin bash bridge that forwards Claude Code and Codex CLI hook events to the plugin via `zellij pipe`
 
 ```
-Claude Code hook → zellaude-hook.sh → zellij pipe → plugin → render
+Claude Code / Codex CLI hook → zellaude-hook.sh → zellij pipe → plugin → render
 ```
 
 The hook script and registration are version-tagged and updated automatically when the plugin version changes.

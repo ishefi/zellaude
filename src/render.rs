@@ -1,5 +1,5 @@
 use crate::state::{
-    unix_now, unix_now_ms, Activity, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
+    unix_now, unix_now_ms, Activity, Agent, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
     NotifyMode, SessionInfo, SettingKey, State, ViewMode,
 };
 use std::fmt::Write;
@@ -27,10 +27,36 @@ fn activity_priority(activity: &Activity) -> u8 {
     }
 }
 
-fn activity_style(activity: &Activity) -> Style {
+fn activity_style(activity: &Activity, agent: Agent) -> Style {
     match activity {
-        Activity::Init => Style { symbol: "◆", r: 180, g: 175, b: 195 },
-        Activity::Thinking => Style { symbol: "●", r: 180, g: 140, b: 255 },
+        Activity::Init => match agent {
+            Agent::Claude => Style {
+                symbol: "◆",
+                r: 180,
+                g: 175,
+                b: 195,
+            },
+            Agent::Codex => Style {
+                symbol: "◇",
+                r: 140,
+                g: 200,
+                b: 220,
+            },
+        },
+        Activity::Thinking => match agent {
+            Agent::Claude => Style {
+                symbol: "●",
+                r: 180,
+                g: 140,
+                b: 255,
+            },
+            Agent::Codex => Style {
+                symbol: "◉",
+                r: 100,
+                g: 200,
+                b: 230,
+            },
+        },
         Activity::Tool(name) => {
             let symbol = match name.as_str() {
                 "Bash" => "⚡",
@@ -40,14 +66,57 @@ fn activity_style(activity: &Activity) -> Style {
                 "WebSearch" | "WebFetch" => "◈",
                 _ => "⚙",
             };
-            Style { symbol, r: 255, g: 170, b: 50 }
+            Style {
+                symbol,
+                r: 255,
+                g: 170,
+                b: 50,
+            }
         }
-        Activity::Prompting => Style { symbol: "▶", r: 80, g: 200, b: 120 },
-        Activity::Waiting => Style { symbol: "⚠", r: 255, g: 60, b: 60 },
-        Activity::Notification => Style { symbol: "◇", r: 200, g: 200, b: 100 },
-        Activity::Done => Style { symbol: "✓", r: 80, g: 200, b: 120 },
-        Activity::AgentDone => Style { symbol: "✓", r: 80, g: 180, b: 100 },
-        Activity::Idle => Style { symbol: "○", r: 180, g: 175, b: 195 },
+        Activity::Prompting => Style {
+            symbol: "▶",
+            r: 80,
+            g: 200,
+            b: 120,
+        },
+        Activity::Waiting => Style {
+            symbol: "⚠",
+            r: 255,
+            g: 60,
+            b: 60,
+        },
+        Activity::Notification => Style {
+            symbol: "◇",
+            r: 200,
+            g: 200,
+            b: 100,
+        },
+        Activity::Done => Style {
+            symbol: "✓",
+            r: 80,
+            g: 200,
+            b: 120,
+        },
+        Activity::AgentDone => Style {
+            symbol: "✓",
+            r: 80,
+            g: 180,
+            b: 100,
+        },
+        Activity::Idle => match agent {
+            Agent::Claude => Style {
+                symbol: "○",
+                r: 180,
+                g: 175,
+                b: 195,
+            },
+            Agent::Codex => Style {
+                symbol: "◌",
+                r: 140,
+                g: 200,
+                b: 220,
+            },
+        },
     }
 }
 
@@ -151,7 +220,11 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     };
     let prefix_text = format!(" Zellaude{session_part} ");
     let prefix_width = display_width(&prefix_text);
-    let mode_pill_width = if show_mode { 1 + mode_text.len() + 1 } else { 0 };
+    let mode_pill_width = if show_mode {
+        1 + mode_text.len() + 1
+    } else {
+        0
+    };
     let total_prefix_width = prefix_width + mode_pill_width;
 
     // Render prefix segment (truncate if wider than cols)
@@ -195,7 +268,11 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     }
     state.prefix_click_region = Some((0, col));
 
-    let last_prefix_bg = if show_mode && total_prefix_width <= cols { mode_bg } else { prefix_bg };
+    let last_prefix_bg = if show_mode && total_prefix_width <= cols {
+        mode_bg
+    } else {
+        prefix_bg
+    };
     let prefix_used = col;
 
     if col < cols {
@@ -307,7 +384,10 @@ fn render_tabs(
         let truncated = if max_name_len == 0 {
             String::new()
         } else if char_count > max_name_len {
-            let s: String = tab_name.chars().take(max_name_len.saturating_sub(1)).collect();
+            let s: String = tab_name
+                .chars()
+                .take(max_name_len.saturating_sub(1))
+                .collect();
             format!("{s}…")
         } else {
             tab_name.to_string()
@@ -350,7 +430,7 @@ fn render_tabs(
 
         if is_claude {
             let s = session.unwrap();
-            let style = activity_style(&s.activity);
+            let style = activity_style(&s.activity, s.agent);
 
             let (sym_fg, name_fg, name_bold) = if is_flash_bright {
                 (fg(255, 255, 80), fg(255, 255, 80), true)
@@ -506,8 +586,14 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         let (symbol, label, sym_color, label_color) =
             notify_mode_label(state.settings.notifications);
         render_tristate(
-            buf, col, &mut state.menu_click_regions,
-            SettingKey::Notifications, symbol, label, &sym_color, &label_color,
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::Notifications,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
         );
     }
 
@@ -515,11 +601,16 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
     {
         let _ = write!(buf, "  ");
         *col += 2;
-        let (symbol, label, sym_color, label_color) =
-            flash_mode_label(state.settings.flash);
+        let (symbol, label, sym_color, label_color) = flash_mode_label(state.settings.flash);
         render_tristate(
-            buf, col, &mut state.menu_click_regions,
-            SettingKey::Flash, symbol, label, &sym_color, &label_color,
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::Flash,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
         );
     }
 
@@ -533,10 +624,20 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         } else {
             ("○", fg(100, 100, 100), fg(100, 100, 100))
         };
-        let label = if enabled { "Elapsed time: on" } else { "Elapsed time: off" };
+        let label = if enabled {
+            "Elapsed time: on"
+        } else {
+            "Elapsed time: off"
+        };
         render_tristate(
-            buf, col, &mut state.menu_click_regions,
-            SettingKey::ElapsedTime, symbol, label, &sym_color, &label_color,
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::ElapsedTime,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
         );
     }
 
@@ -550,10 +651,20 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         } else {
             ("○", fg(100, 100, 100), fg(100, 100, 100))
         };
-        let label = if enabled { "Mode indicator: on" } else { "Mode indicator: off" };
+        let label = if enabled {
+            "Mode indicator: on"
+        } else {
+            "Mode indicator: off"
+        };
         render_tristate(
-            buf, col, &mut state.menu_click_regions,
-            SettingKey::ModeIndicator, symbol, label, &sym_color, &label_color,
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::ModeIndicator,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
         );
     }
 
