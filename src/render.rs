@@ -1,5 +1,5 @@
 use crate::state::{
-    unix_now, unix_now_ms, Activity, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
+    unix_now_ms, Activity, ClickAction, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
     NotifyMode, SessionInfo, SettingKey, State, ViewMode,
 };
 use std::fmt::Write;
@@ -11,20 +11,6 @@ struct Style {
     r: u8,
     g: u8,
     b: u8,
-}
-
-fn activity_priority(activity: &Activity) -> u8 {
-    match activity {
-        Activity::Waiting => 8,
-        Activity::Tool(_) => 7,
-        Activity::Thinking => 6,
-        Activity::Prompting => 5,
-        Activity::Notification => 4,
-        Activity::Init => 3,
-        Activity::Done => 2,
-        Activity::AgentDone => 1,
-        Activity::Idle => 0,
-    }
 }
 
 fn activity_style(activity: &Activity) -> Style {
@@ -65,7 +51,6 @@ fn display_width(s: &str) -> usize {
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
-const ELAPSED_THRESHOLD: u64 = 30;
 const SEPARATOR: &str = "\u{e0b0}";
 
 type Color = (u8, u8, u8);
@@ -74,7 +59,7 @@ const PREFIX_BG: Color = (60, 50, 80);
 const PREFIX_BG_SETTINGS: Color = (100, 70, 140);
 const TAB_BG_ACTIVE: Color = (140, 100, 200);
 const TAB_BG_INACTIVE: Color = (80, 75, 110);
-const FLASH_BG_BRIGHT: Color = (80, 80, 30);
+const FLASH_FG_BRIGHT: Color = (255, 255, 80);
 
 /// Write a powerline arrow: fg=from_bg, bg=to_bg, then separator char.
 fn arrow(buf: &mut String, col: &mut usize, from: Color, to: Color) {
@@ -85,16 +70,6 @@ fn arrow(buf: &mut String, col: &mut usize, from: Color, to: Color) {
         bg(to.0, to.1, to.2),
     );
     *col += 1;
-}
-
-fn format_elapsed(secs: u64) -> String {
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
-    } else {
-        format!("{}h", secs / 3600)
-    }
 }
 
 fn mode_style(mode: InputMode) -> (Color, &'static str) {
@@ -230,10 +205,8 @@ fn render_tabs(
     prefix_bg: Color,
     prefix_width: usize,
 ) {
-    let now_s = unix_now();
     let now_ms = unix_now_ms();
 
-    // Sort tabs by position
     let mut tabs: Vec<&TabInfo> = state.tabs.iter().collect();
     tabs.sort_by_key(|t| t.position);
 
@@ -243,66 +216,53 @@ fn render_tabs(
         return;
     }
 
-    // For each tab, find the best (highest-priority) Claude session
-    let best_sessions: Vec<Option<&SessionInfo>> = tabs
+    let tab_sessions: Vec<Vec<&SessionInfo>> = tabs
         .iter()
         .map(|tab| {
-            state
+            let mut sessions: Vec<&SessionInfo> = state
                 .sessions
                 .values()
                 .filter(|s| s.tab_index == Some(tab.position))
-                .max_by_key(|s| activity_priority(&s.activity))
+                .collect();
+            sessions.sort_by_key(|s| s.pane_id);
+            sessions
         })
         .collect();
 
-    // Pre-compute elapsed strings (only for Claude tabs)
-    let elapsed_strs: Vec<Option<String>> = best_sessions
+    let per_tab_fixed: Vec<usize> = tab_sessions
         .iter()
-        .map(|session: &Option<&SessionInfo>| {
-            if !state.settings.elapsed_time {
-                return None;
+        .map(|sessions| {
+            if sessions.is_empty() {
+                2
+            } else {
+                let n = sessions.len();
+                let symbols_width: usize = sessions
+                    .iter()
+                    .map(|s| display_width(activity_style(&s.activity).symbol))
+                    .sum();
+                symbols_width + n + 1
             }
-            session.and_then(|s| {
-                let elapsed = now_s.saturating_sub(s.last_event_ts);
-                if elapsed >= ELAPSED_THRESHOLD {
-                    Some(format_elapsed(elapsed))
-                } else {
-                    None
-                }
-            })
         })
         .collect();
 
-    // Compute overhead: varies per tab type
-    let total_elapsed_width: usize = elapsed_strs
-        .iter()
-        .map(|e: &Option<String>| e.as_ref().map_or(0, |s| s.len() + 1))
-        .sum();
-    let per_tab_overhead: usize = best_sessions
-        .iter()
-        .map(|s: &Option<&SessionInfo>| if s.is_some() { 4 } else { 2 })
-        .sum();
-    let overhead = prefix_width + 2 * count + per_tab_overhead + total_elapsed_width;
-    let max_name_len = if overhead < cols {
-        ((cols - overhead) / count).min(20)
-    } else {
-        0
-    };
+    let fixed_total: usize =
+        prefix_width + 2 * count + per_tab_fixed.iter().sum::<usize>();
+    let remaining = cols.saturating_sub(fixed_total);
+    let name_budget = (remaining / count).min(21);
+    let max_name_len = if name_budget >= 2 { name_budget - 1 } else { 0 };
 
     let mut prev_bg = prefix_bg;
 
     for (i, tab) in tabs.iter().enumerate() {
-        // Stop if we'd overflow — need room for at least arrow + closing arrow
         let arrows_needed = if prev_bg == prefix_bg { 1 } else { 2 };
         if *col + arrows_needed + 3 > cols {
             break;
         }
 
-        let session = best_sessions[i];
-        let is_claude = session.is_some();
+        let sessions = &tab_sessions[i];
+        let is_claude = !sessions.is_empty();
         let tab_name = &tab.name;
 
-        // Truncate name
         let char_count = tab_name.chars().count();
         let truncated = if max_name_len == 0 {
             String::new()
@@ -313,31 +273,9 @@ fn render_tabs(
             tab_name.to_string()
         };
 
-        // Check flash for any session in this tab
-        let is_flash_bright = state
-            .sessions
-            .values()
-            .filter(|s| s.tab_index == Some(tab.position))
-            .any(|s| {
-                state
-                    .flash_deadlines
-                    .get(&s.pane_id)
-                    .map(|&deadline| now_ms < deadline && (now_ms / 250) % 2 == 0)
-                    .unwrap_or(false)
-            });
-
         let is_active = tab.active;
+        let tab_bg = if is_active { TAB_BG_ACTIVE } else { TAB_BG_INACTIVE };
 
-        // Pick tab background color
-        let tab_bg = if is_flash_bright {
-            FLASH_BG_BRIGHT
-        } else if is_active {
-            TAB_BG_ACTIVE
-        } else {
-            TAB_BG_INACTIVE
-        };
-
-        // Arrow: close previous segment, then open this tab
         if prev_bg == prefix_bg {
             arrow(buf, col, prev_bg, tab_bg);
         } else {
@@ -346,110 +284,110 @@ fn render_tabs(
         }
 
         let tab_bg_str = bg(tab_bg.0, tab_bg.1, tab_bg.2);
-        let region_start = *col;
 
         if is_claude {
-            let s = session.unwrap();
-            let style = activity_style(&s.activity);
-
-            let (sym_fg, name_fg, name_bold) = if is_flash_bright {
-                (fg(255, 255, 80), fg(255, 255, 80), true)
-            } else if is_active {
-                (fg(style.r, style.g, style.b), fg(255, 255, 255), true)
-            } else {
-                (fg(style.r, style.g, style.b), fg(120, 220, 220), false)
-            };
-
-            // Leading space
             let _ = write!(buf, "{tab_bg_str} ");
             *col += 1;
 
-            // Symbol
-            let _ = write!(buf, "{sym_fg}{}", style.symbol);
-            *col += display_width(style.symbol);
+            for (sym_idx, session) in sessions.iter().enumerate() {
+                let style = activity_style(&session.activity);
 
-            // Space + name
+                let is_flashing = state
+                    .flash_deadlines
+                    .get(&session.pane_id)
+                    .map(|&deadline| now_ms < deadline && (now_ms / 250) % 2 == 0)
+                    .unwrap_or(false);
+
+                let sym_fg = if is_flashing {
+                    fg(FLASH_FG_BRIGHT.0, FLASH_FG_BRIGHT.1, FLASH_FG_BRIGHT.2)
+                } else {
+                    fg(style.r, style.g, style.b)
+                };
+
+                let region_start = *col;
+                let _ = write!(buf, "{tab_bg_str}{sym_fg}{}", style.symbol);
+                *col += display_width(style.symbol);
+
+                if sym_idx + 1 < sessions.len() {
+                    let _ = write!(buf, "{tab_bg_str} ");
+                    *col += 1;
+                }
+
+                state.click_regions.push(ClickRegion {
+                    start_col: region_start,
+                    end_col: *col,
+                    action: ClickAction::FocusPane(session.pane_id),
+                });
+            }
+
+            let name_start = *col;
+
             if !truncated.is_empty() {
+                let (name_fg_str, name_bold) = if is_active {
+                    (fg(255, 255, 255), true)
+                } else {
+                    (fg(120, 220, 220), false)
+                };
                 let bold_str = if name_bold { BOLD } else { "" };
-                let _ = write!(buf, " {bold_str}{name_fg}{truncated}{RESET}{tab_bg_str}");
+                let _ = write!(
+                    buf,
+                    "{tab_bg_str} {bold_str}{name_fg_str}{truncated}{RESET}{tab_bg_str}"
+                );
                 *col += 1 + display_width(&truncated);
             }
 
-            // Elapsed suffix
-            if let Some(ref es) = elapsed_strs[i] {
-                if *col + 1 + es.len() + 1 < cols {
-                    let _ = write!(buf, " {}{es}", fg(165, 160, 180));
-                    *col += 1 + es.len();
-                }
-            }
-
-            // Fullscreen indicator
             if tab.is_fullscreen_active && *col + 3 < cols {
                 let _ = write!(buf, " {}F{RESET}{tab_bg_str}", fg(255, 200, 60));
                 *col += 2;
             }
 
-            // Trailing space
             let _ = write!(buf, " ");
             *col += 1;
 
-            // Click region: if any session is waiting, use its pane_id for focus
-            let waiting_session = state
-                .sessions
-                .values()
-                .filter(|s| s.tab_index == Some(tab.position))
-                .find(|s| matches!(s.activity, Activity::Waiting));
-
-            state.click_regions.push(ClickRegion {
-                start_col: region_start,
-                end_col: *col,
-                tab_index: tab.position,
-                pane_id: waiting_session.map_or(0, |s| s.pane_id),
-                is_waiting: waiting_session.is_some(),
-            });
+            if *col > name_start {
+                state.click_regions.push(ClickRegion {
+                    start_col: name_start,
+                    end_col: *col,
+                    action: ClickAction::SwitchTab(tab.position),
+                });
+            }
         } else {
-            // Non-Claude tab: dimmer, no symbol
-            let name_fg = if is_active {
+            let region_start = *col;
+
+            let name_fg_str = if is_active {
                 fg(220, 215, 230)
             } else {
                 fg(170, 165, 185)
             };
             let name_bold = is_active;
 
-            // Leading space
             let _ = write!(buf, "{tab_bg_str} ");
             *col += 1;
 
-            // Name only (no symbol)
             if !truncated.is_empty() {
                 let bold_str = if name_bold { BOLD } else { "" };
-                let _ = write!(buf, "{bold_str}{name_fg}{truncated}{RESET}{tab_bg_str}");
+                let _ = write!(buf, "{bold_str}{name_fg_str}{truncated}{RESET}{tab_bg_str}");
                 *col += display_width(&truncated);
             }
 
-            // Fullscreen indicator
             if tab.is_fullscreen_active && *col + 3 < cols {
                 let _ = write!(buf, " {}F{RESET}{tab_bg_str}", fg(255, 200, 60));
                 *col += 2;
             }
 
-            // Trailing space
             let _ = write!(buf, " ");
             *col += 1;
 
             state.click_regions.push(ClickRegion {
                 start_col: region_start,
                 end_col: *col,
-                tab_index: tab.position,
-                pane_id: 0,
-                is_waiting: false,
+                action: ClickAction::SwitchTab(tab.position),
             });
         }
 
         prev_bg = tab_bg;
     }
 
-    // Arrow from last tab → bar background (only if we rendered any tabs)
     if prev_bg != prefix_bg || count > 0 {
         arrow(buf, col, prev_bg, BAR_BG);
     }
@@ -520,23 +458,6 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         render_tristate(
             buf, col, &mut state.menu_click_regions,
             SettingKey::Flash, symbol, label, &sym_color, &label_color,
-        );
-    }
-
-    // --- Elapsed time (bool) ---
-    {
-        let _ = write!(buf, "  ");
-        *col += 2;
-        let enabled = state.settings.elapsed_time;
-        let (symbol, sym_color, label_color) = if enabled {
-            ("●", fg(80, 200, 120), fg(255, 255, 255))
-        } else {
-            ("○", fg(100, 100, 100), fg(100, 100, 100))
-        };
-        let label = if enabled { "Elapsed time: on" } else { "Elapsed time: off" };
-        render_tristate(
-            buf, col, &mut state.menu_click_regions,
-            SettingKey::ElapsedTime, symbol, label, &sym_color, &label_color,
         );
     }
 

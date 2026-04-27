@@ -4,7 +4,10 @@ mod render;
 mod state;
 mod tab_pane_map;
 
-use state::{unix_now, unix_now_ms, HookPayload, MenuAction, SessionInfo, Settings, State, ViewMode};
+use state::{
+    unix_now, unix_now_ms, ClickAction, HookPayload, MenuAction, SessionInfo, Settings, State,
+    ViewMode,
+};
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
@@ -84,10 +87,13 @@ impl ZellijPlugin for State {
                     ViewMode::Normal => {
                         for region in &self.click_regions {
                             if col >= region.start_col && col < region.end_col {
-                                if region.is_waiting {
-                                    focus_terminal_pane(region.pane_id, false);
-                                } else {
-                                    switch_tab_to(region.tab_index as u32 + 1);
+                                match region.action {
+                                    ClickAction::FocusPane(pane_id) => {
+                                        focus_terminal_pane(pane_id, false);
+                                    }
+                                    ClickAction::SwitchTab(tab_index) => {
+                                        switch_tab_to(tab_index as u32 + 1);
+                                    }
                                 }
                                 return false;
                             }
@@ -107,10 +113,6 @@ impl ZellijPlugin for State {
                                             state::SettingKey::Flash => {
                                                 self.settings.flash =
                                                     self.settings.flash.cycle();
-                                            }
-                                            state::SettingKey::ElapsedTime => {
-                                                self.settings.elapsed_time =
-                                                    !self.settings.elapsed_time;
                                             }
                                             state::SettingKey::ModeIndicator => {
                                                 self.settings.mode_indicator =
@@ -156,7 +158,7 @@ impl ZellijPlugin for State {
                 } else {
                     set_timeout(TIMER_INTERVAL);
                 }
-                has_flashes || stale_changed || flash_changed || self.has_elapsed_display()
+                has_flashes || stale_changed || flash_changed
             }
             Event::PermissionRequestResult(_) => {
                 // Now that permissions are granted, mark as non-selectable
@@ -301,17 +303,6 @@ impl State {
         let now = unix_now_ms();
         self.flash_deadlines.retain(|_, deadline| now < *deadline);
         self.flash_deadlines.len() != before
-    }
-
-    fn has_elapsed_display(&self) -> bool {
-        if !self.settings.elapsed_time {
-            return false;
-        }
-        let now = unix_now();
-        self.sessions.values().any(|s| {
-            !matches!(s.activity, state::Activity::Idle)
-                && now.saturating_sub(s.last_event_ts) >= DONE_TIMEOUT
-        })
     }
 
     fn request_sync(&self) {
