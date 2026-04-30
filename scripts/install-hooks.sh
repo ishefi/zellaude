@@ -6,6 +6,7 @@ set -euo pipefail
 
 SETTINGS="$HOME/.claude/settings.json"
 HOOK_SCRIPT="$(cd "$(dirname "$0")" && pwd)/zellaude-hook.sh"
+HOOK_CMD='${HOME}/.config/zellij/plugins/zellaude-hook.sh'
 
 if ! command -v jq &>/dev/null; then
   echo "Error: jq is required. Install with: brew install jq" >&2
@@ -18,7 +19,7 @@ if [ ! -f "$HOOK_SCRIPT" ]; then
 fi
 
 # The hook entry shared by all events
-HOOK_ENTRY=$(jq -nc --arg cmd "$HOOK_SCRIPT" '[{
+HOOK_ENTRY=$(jq -nc --arg cmd "$HOOK_CMD" '[{
   "hooks": [{
     "type": "command",
     "command": $cmd,
