@@ -2,6 +2,7 @@ use crate::state::{
     unix_now, unix_now_ms, Activity, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
     NotifyMode, SessionInfo, SettingKey, State, ViewMode,
 };
+use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::Write as IoWrite;
 use zellij_tile::prelude::{InputMode, TabInfo};
@@ -11,20 +12,6 @@ struct Style {
     r: u8,
     g: u8,
     b: u8,
-}
-
-fn activity_priority(activity: &Activity) -> u8 {
-    match activity {
-        Activity::Waiting => 8,
-        Activity::Tool(_) => 7,
-        Activity::Thinking => 6,
-        Activity::Prompting => 5,
-        Activity::Notification => 4,
-        Activity::Init => 3,
-        Activity::Done => 2,
-        Activity::AgentDone => 1,
-        Activity::Idle => 0,
-    }
 }
 
 fn activity_style(activity: &Activity) -> Style {
@@ -243,44 +230,78 @@ fn render_tabs(
         return;
     }
 
-    // For each tab, find the best (highest-priority) Claude session
-    let best_sessions: Vec<Option<&SessionInfo>> = tabs
+    // Per-tab pane geometry is used to order markers top-to-bottom,
+    // left-to-right. Plugin panes are excluded because PaneInfo.id is only
+    // unique within kind, so a plugin pane can share a terminal pane id.
+    let pane_positions: HashMap<usize, HashMap<u32, (usize, usize)>> = state
+        .pane_manifest
+        .as_ref()
+        .map(|m| {
+            m.panes
+                .iter()
+                .map(|(&tab_idx, panes)| {
+                    let positions: HashMap<u32, (usize, usize)> = panes
+                        .iter()
+                        .filter(|p| !p.is_plugin)
+                        .map(|p| (p.id, (p.pane_y, p.pane_x)))
+                        .collect();
+                    (tab_idx, positions)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let sessions_per_tab: Vec<Vec<&SessionInfo>> = tabs
         .iter()
         .map(|tab| {
-            state
+            let mut sessions: Vec<&SessionInfo> = state
                 .sessions
                 .values()
                 .filter(|s| s.tab_index == Some(tab.position))
-                .max_by_key(|s| activity_priority(&s.activity))
+                .collect();
+            if let Some(positions) = pane_positions.get(&tab.position) {
+                sessions.sort_by_key(|s| {
+                    positions
+                        .get(&s.pane_id)
+                        .copied()
+                        .unwrap_or((usize::MAX, usize::MAX))
+                });
+            }
+            sessions
         })
         .collect();
 
-    // Pre-compute elapsed strings (only for Claude tabs)
-    let elapsed_strs: Vec<Option<String>> = best_sessions
+    // Elapsed time is meaningful only when a tab has a single tracked session.
+    let elapsed_strs: Vec<Option<String>> = sessions_per_tab
         .iter()
-        .map(|session: &Option<&SessionInfo>| {
-            if !state.settings.elapsed_time {
+        .map(|sessions| {
+            if !state.settings.elapsed_time || sessions.len() != 1 {
                 return None;
             }
-            session.and_then(|s| {
-                let elapsed = now_s.saturating_sub(s.last_event_ts);
-                if elapsed >= ELAPSED_THRESHOLD {
-                    Some(format_elapsed(elapsed))
-                } else {
-                    None
-                }
-            })
+            let session = sessions[0];
+            let elapsed = now_s.saturating_sub(session.last_event_ts);
+            if elapsed >= ELAPSED_THRESHOLD {
+                Some(format_elapsed(elapsed))
+            } else {
+                None
+            }
         })
         .collect();
 
-    // Compute overhead: varies per tab type
+    // Compute overhead: arrows plus spaces, names, markers, and elapsed suffixes.
     let total_elapsed_width: usize = elapsed_strs
         .iter()
         .map(|e: &Option<String>| e.as_ref().map_or(0, |s| s.len() + 1))
         .sum();
-    let per_tab_overhead: usize = best_sessions
+    let per_tab_overhead: usize = sessions_per_tab
         .iter()
-        .map(|s: &Option<&SessionInfo>| if s.is_some() { 4 } else { 2 })
+        .map(|sessions| {
+            if sessions.is_empty() {
+                2
+            } else {
+                2 + 2 * sessions.len()
+            }
+        })
         .sum();
     let overhead = prefix_width + 2 * count + per_tab_overhead + total_elapsed_width;
     let max_name_len = if overhead < cols {
@@ -292,14 +313,20 @@ fn render_tabs(
     let mut prev_bg = prefix_bg;
 
     for (i, tab) in tabs.iter().enumerate() {
-        // Stop if we'd overflow — need room for at least arrow + closing arrow
+        let sessions = &sessions_per_tab[i];
+        let tab_overhead = if sessions.is_empty() {
+            2
+        } else {
+            2 + 2 * sessions.len()
+        };
+
+        // Stop if we'd overflow. Agent tabs need enough room for every marker.
         let arrows_needed = if prev_bg == prefix_bg { 1 } else { 2 };
-        if *col + arrows_needed + 3 > cols {
+        if *col + arrows_needed + tab_overhead.max(3) > cols {
             break;
         }
 
-        let session = best_sessions[i];
-        let is_claude = session.is_some();
+        let is_agent = !sessions.is_empty();
         let tab_name = &tab.name;
 
         // Truncate name
@@ -314,17 +341,13 @@ fn render_tabs(
         };
 
         // Check flash for any session in this tab
-        let is_flash_bright = state
-            .sessions
-            .values()
-            .filter(|s| s.tab_index == Some(tab.position))
-            .any(|s| {
-                state
-                    .flash_deadlines
-                    .get(&s.pane_id)
-                    .map(|&deadline| now_ms < deadline && (now_ms / 250) % 2 == 0)
-                    .unwrap_or(false)
-            });
+        let is_flash_bright = sessions.iter().any(|s| {
+            state
+                .flash_deadlines
+                .get(&s.pane_id)
+                .map(|&deadline| now_ms < deadline && (now_ms / 250) % 2 == 0)
+                .unwrap_or(false)
+        });
 
         let is_active = tab.active;
 
@@ -348,31 +371,51 @@ fn render_tabs(
         let tab_bg_str = bg(tab_bg.0, tab_bg.1, tab_bg.2);
         let region_start = *col;
 
-        if is_claude {
-            let s = session.unwrap();
-            let style = activity_style(&s.activity);
-
-            let (sym_fg, name_fg, name_bold) = if is_flash_bright {
-                (fg(255, 255, 80), fg(255, 255, 80), true)
+        if is_agent {
+            let (name_fg, name_bold) = if is_flash_bright {
+                (fg(255, 255, 80), true)
             } else if is_active {
-                (fg(style.r, style.g, style.b), fg(255, 255, 255), true)
+                (fg(255, 255, 255), true)
             } else {
-                (fg(style.r, style.g, style.b), fg(120, 220, 220), false)
+                (fg(120, 220, 220), false)
             };
 
             // Leading space
             let _ = write!(buf, "{tab_bg_str} ");
             *col += 1;
 
-            // Symbol
-            let _ = write!(buf, "{sym_fg}{}", style.symbol);
-            *col += display_width(style.symbol);
+            // One marker per session, in pane-geometry order. Waiting markers
+            // get their own click regions so clicks focus the specific pane.
+            for session in sessions {
+                let style = activity_style(&session.activity);
+                let sym_fg = if is_flash_bright {
+                    fg(255, 255, 80)
+                } else {
+                    fg(style.r, style.g, style.b)
+                };
+                let marker_start = *col;
+                let _ = write!(buf, "{sym_fg}{}", style.symbol);
+                *col += display_width(style.symbol);
+                let marker_end = *col;
+                let _ = write!(buf, "{tab_bg_str} ");
+                *col += 1;
 
-            // Space + name
+                if matches!(session.activity, Activity::Waiting) {
+                    state.click_regions.push(ClickRegion {
+                        start_col: marker_start,
+                        end_col: marker_end,
+                        tab_index: tab.position,
+                        pane_id: session.pane_id,
+                        is_waiting: true,
+                    });
+                }
+            }
+
+            // The last marker already wrote the space before the tab name.
             if !truncated.is_empty() {
                 let bold_str = if name_bold { BOLD } else { "" };
-                let _ = write!(buf, " {bold_str}{name_fg}{truncated}{RESET}{tab_bg_str}");
-                *col += 1 + display_width(&truncated);
+                let _ = write!(buf, "{bold_str}{name_fg}{truncated}{RESET}{tab_bg_str}");
+                *col += display_width(&truncated);
             }
 
             // Elapsed suffix
@@ -393,22 +436,17 @@ fn render_tabs(
             let _ = write!(buf, " ");
             *col += 1;
 
-            // Click region: if any session is waiting, use its pane_id for focus
-            let waiting_session = state
-                .sessions
-                .values()
-                .filter(|s| s.tab_index == Some(tab.position))
-                .find(|s| matches!(s.activity, Activity::Waiting));
-
+            // Catch-all tab click region, after marker regions so marker
+            // hits are matched first.
             state.click_regions.push(ClickRegion {
                 start_col: region_start,
                 end_col: *col,
                 tab_index: tab.position,
-                pane_id: waiting_session.map_or(0, |s| s.pane_id),
-                is_waiting: waiting_session.is_some(),
+                pane_id: 0,
+                is_waiting: false,
             });
         } else {
-            // Non-Claude tab: dimmer, no symbol
+            // Non-agent tab: dimmer, no symbol
             let name_fg = if is_active {
                 fg(220, 215, 230)
             } else {
