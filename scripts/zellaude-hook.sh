@@ -95,7 +95,7 @@ if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
   esac
 
   if [ "$SHOULD_NOTIFY" = true ]; then
-    TITLE="⚠ Claude Code — session “${ZELLIJ_SESSION_NAME}”"
+    TITLE="⚠ Claude Code — session \"${ZELLIJ_SESSION_NAME}\""
     MESSAGE="Permission requested"
     [ -n "$TOOL_NAME" ] && MESSAGE="${MESSAGE} — ${TOOL_NAME}"
     if [ -n "$CWD" ]; then
@@ -128,7 +128,14 @@ if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
               -message "$MESSAGE" \
               -execute "$FOCUS_CMD" &
           else
-            osascript -e "display notification \"$MESSAGE\" with title \"$TITLE\"" &
+            # Pass TITLE/MESSAGE as argv so AppleScript treats them as data,
+            # not source — session names and cwds are user-controlled and
+            # may contain quotes, backslashes, or newlines.
+            osascript \
+              -e 'on run argv' \
+              -e 'display notification (item 1 of argv) with title (item 2 of argv)' \
+              -e 'end run' \
+              -- "$MESSAGE" "$TITLE" &
           fi
           ;;
         Linux)
