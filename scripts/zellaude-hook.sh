@@ -95,10 +95,17 @@ if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
   esac
 
   if [ "$SHOULD_NOTIFY" = true ]; then
-    TOOL_SUFFIX=""
-    [ -n "$TOOL_NAME" ] && TOOL_SUFFIX=" — $TOOL_NAME"
-    TITLE="⚠ Claude Code"
-    MESSAGE="Permission requested${TOOL_SUFFIX}"
+    TITLE="⚠ Claude Code — session “${ZELLIJ_SESSION_NAME}”"
+    MESSAGE="Permission requested"
+    [ -n "$TOOL_NAME" ] && MESSAGE="${MESSAGE} — ${TOOL_NAME}"
+    if [ -n "$CWD" ]; then
+      CWD_DISPLAY="$CWD"
+      case "$CWD_DISPLAY" in
+        "$HOME") CWD_DISPLAY="~" ;;
+        "$HOME"/*) CWD_DISPLAY="~/${CWD_DISPLAY#"$HOME"/}" ;;
+      esac
+      MESSAGE="${MESSAGE} in ${CWD_DISPLAY}"
+    fi
 
     # Rate-limit: one notification per pane per 10 seconds
     LOCK="/tmp/zellaude-notify-${ZELLIJ_PANE_ID}"
