@@ -95,10 +95,17 @@ if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
   esac
 
   if [ "$SHOULD_NOTIFY" = true ]; then
-    TOOL_SUFFIX=""
-    [ -n "$TOOL_NAME" ] && TOOL_SUFFIX=" — $TOOL_NAME"
-    TITLE="⚠ Claude Code"
-    MESSAGE="Permission requested${TOOL_SUFFIX}"
+    TITLE="⚠ Claude Code — session \"${ZELLIJ_SESSION_NAME}\""
+    MESSAGE="Permission requested"
+    [ -n "$TOOL_NAME" ] && MESSAGE="${MESSAGE} — ${TOOL_NAME}"
+    if [ -n "$CWD" ]; then
+      CWD_DISPLAY="$CWD"
+      case "$CWD_DISPLAY" in
+        "$HOME") CWD_DISPLAY="~" ;;
+        "$HOME"/*) CWD_DISPLAY="~/${CWD_DISPLAY#"$HOME"/}" ;;
+      esac
+      MESSAGE="${MESSAGE} in ${CWD_DISPLAY}"
+    fi
 
     # Rate-limit: one notification per pane per 10 seconds
     LOCK="/tmp/zellaude-notify-${ZELLIJ_PANE_ID}"
@@ -121,7 +128,14 @@ if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
               -message "$MESSAGE" \
               -execute "$FOCUS_CMD" &
           else
-            osascript -e "display notification \"$MESSAGE\" with title \"$TITLE\"" &
+            # Pass TITLE/MESSAGE as argv so AppleScript treats them as data,
+            # not source — session names and cwds are user-controlled and
+            # may contain quotes, backslashes, or newlines.
+            osascript \
+              -e 'on run argv' \
+              -e 'display notification (item 1 of argv) with title (item 2 of argv)' \
+              -e 'end run' \
+              -- "$MESSAGE" "$TITLE" &
           fi
           ;;
         Linux)
