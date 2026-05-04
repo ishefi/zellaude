@@ -56,41 +56,70 @@ if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
     NOTIFY_MODE=$(jq -r '.notifications // "Always"' "$SETTINGS_FILE" 2>/dev/null)
   fi
 
-  # For "Unfocused" mode, check if the terminal app is frontmost
+  # Returns 0 if the terminal emulator window is frontmost on the OS, 1 otherwise.
+  # Graceful-degrades to 1 when the required OS tools aren't available.
+  is_terminal_frontmost() {
+    case "$(uname)" in
+      Darwin)
+        local expected="${TERM_PROGRAM:-}"
+        case "$expected" in
+          Apple_Terminal) expected="Terminal" ;;
+          iTerm.app)     expected="iTerm2" ;;
+        esac
+        local front_app
+        front_app=$(osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null)
+        [ "$front_app" = "$expected" ]
+        ;;
+      Linux)
+        # X11 only: Wayland has no standard API.
+        command -v xdotool >/dev/null 2>&1 || return 1
+        local active_pid
+        active_pid=$(xdotool getactivewindow getwindowpid 2>/dev/null)
+        [ -n "$active_pid" ] || return 1
+        # Walk up the process tree; if the focused window's process is an
+        # ancestor of our shell, the terminal is frontmost.
+        local pid=$$
+        while [ "$pid" -gt 1 ] 2>/dev/null; do
+          [ "$pid" = "$active_pid" ] && return 0
+          pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+        done
+        return 1
+        ;;
+      *) return 1 ;;
+    esac
+  }
+
+  # Returns 0 if a zellij client in this session is focused on the pane that
+  # fired the hook, 1 otherwise. Returns 2 if zellij couldn't answer — callers
+  # treat that as "unknown, fall back to the OS-level frontmost check".
+  is_this_pane_focused_in_session() {
+    command -v zellij >/dev/null 2>&1 || return 2
+    local clients
+    clients=$(zellij -s "$ZELLIJ_SESSION_NAME" action list-clients 2>/dev/null) || return 2
+    # Drop header, select the ZELLIJ_PANE_ID column (col 2), match `terminal_<id>`.
+    echo "$clients" | tail -n +2 | awk '{print $2}' | grep -qx "terminal_${ZELLIJ_PANE_ID}"
+  }
+
   SHOULD_NOTIFY=false
   case "$NOTIFY_MODE" in
     Always) SHOULD_NOTIFY=true ;;
     Unfocused)
-      TERM_FOCUSED=false
-      case "$(uname)" in
-        Darwin)
-          # Map TERM_PROGRAM to macOS process name
-          EXPECTED="${TERM_PROGRAM:-}"
-          case "$EXPECTED" in
-            Apple_Terminal) EXPECTED="Terminal" ;;
-            iTerm.app)     EXPECTED="iTerm2" ;;
-          esac
-          FRONT_APP=$(osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null)
-          [ "$FRONT_APP" = "$EXPECTED" ] && TERM_FOCUSED=true
+      is_this_pane_focused_in_session
+      case $? in
+        0)
+          # Pane is focused in zellij — suppress only if the terminal window
+          # itself is also frontmost on the OS.
+          is_terminal_frontmost || SHOULD_NOTIFY=true
           ;;
-        Linux)
-          # X11: check if focused window belongs to our terminal
-          if command -v xdotool >/dev/null 2>&1; then
-            ACTIVE_PID=$(xdotool getactivewindow getwindowpid 2>/dev/null)
-            if [ -n "$ACTIVE_PID" ]; then
-              # Walk up the process tree from our shell to see if the
-              # focused window's process is an ancestor (i.e. our terminal)
-              PID=$$
-              while [ "$PID" -gt 1 ] 2>/dev/null; do
-                [ "$PID" = "$ACTIVE_PID" ] && { TERM_FOCUSED=true; break; }
-                PID=$(ps -o ppid= -p "$PID" 2>/dev/null | tr -d ' ')
-              done
-            fi
-          fi
-          # Wayland: no standard way to check; fall through to not-focused
+        1)
+          # Session detached, or user is on a different pane in this session.
+          SHOULD_NOTIFY=true
+          ;;
+        *)
+          # zellij couldn't answer — fall back to Phase 1 behavior.
+          is_terminal_frontmost || SHOULD_NOTIFY=true
           ;;
       esac
-      [ "$TERM_FOCUSED" = false ] && SHOULD_NOTIFY=true
       ;;
   esac
 
