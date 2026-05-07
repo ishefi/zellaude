@@ -19,9 +19,24 @@ const INSTALL_TEMPLATE: &str = r##"set -e
 HOOK_PATH="$HOME/.config/zellij/plugins/zellaude-hook.sh"
 HOOK_CMD='${HOME}/.config/zellij/plugins/zellaude-hook.sh'
 SETTINGS="$HOME/.claude/settings.json"
+
+resolve_file_symlink() {
+  path=$1
+  while [ -L "$path" ]; do
+    dir=$(cd "$(dirname "$path")" && pwd -P)
+    target=$(readlink "$path")
+    case "$target" in
+      /*) path=$target ;;
+      *) path=$dir/$target ;;
+    esac
+  done
+  dir=$(cd "$(dirname "$path")" && pwd -P)
+  printf '%s/%s\n' "$dir" "$(basename "$path")"
+}
+
 # Resolve symlink so mv doesn't replace the link with a regular file
 if [ -L "$SETTINGS" ]; then
-  SETTINGS="$(readlink -f "$SETTINGS")"
+  SETTINGS="$(resolve_file_symlink "$SETTINGS")"
 fi
 
 # Check if already current
