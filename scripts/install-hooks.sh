@@ -6,6 +6,26 @@ set -euo pipefail
 
 SETTINGS="$HOME/.claude/settings.json"
 HOOK_SCRIPT="$(cd "$(dirname "$0")" && pwd)/zellaude-hook.sh"
+HOOK_CMD='${HOME}/.config/zellij/plugins/zellaude-hook.sh'
+
+resolve_file_symlink() {
+  local path dir target
+  path=$1
+  while [ -L "$path" ]; do
+    dir=$(cd "$(dirname "$path")" && pwd -P)
+    target=$(readlink "$path")
+    case "$target" in
+      /*) path=$target ;;
+      *) path=$dir/$target ;;
+    esac
+  done
+  dir=$(cd "$(dirname "$path")" && pwd -P)
+  printf '%s/%s\n' "$dir" "$(basename "$path")"
+}
+
+if [ -L "$SETTINGS" ]; then
+  SETTINGS="$(resolve_file_symlink "$SETTINGS")"
+fi
 
 if ! command -v jq &>/dev/null; then
   echo "Error: jq is required. Install with: brew install jq" >&2
@@ -18,7 +38,7 @@ if [ ! -f "$HOOK_SCRIPT" ]; then
 fi
 
 # The hook entry shared by all events
-HOOK_ENTRY=$(jq -nc --arg cmd "$HOOK_SCRIPT" '[{
+HOOK_ENTRY=$(jq -nc --arg cmd "$HOOK_CMD" '[{
   "hooks": [{
     "type": "command",
     "command": $cmd,
@@ -44,15 +64,15 @@ uninstall() {
 
   backup_settings
 
-  # Remove only zellaude hook entries (those matching our script path)
+  # Remove only zellaude hook entries
   local tmp
   tmp=$(mktemp)
-  jq --arg cmd "$HOOK_SCRIPT" '
+  jq '
     if .hooks and (.hooks | type == "object") then
       .hooks |= with_entries(
         .value |= [
           .[] | . as $group |
-          ($group.hooks // []) | map(select(.command != $cmd)) |
+          ($group.hooks // []) | map(select((.command // "") | endswith("zellaude-hook.sh") | not)) |
           . as $filtered |
           if length > 0 then ($group | .hooks = $filtered) else empty end
         ]

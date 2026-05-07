@@ -122,6 +122,7 @@ Claude Code hook → zellaude-hook.sh → zellij pipe → plugin → render
 ```
 
 The hook script and registration are version-tagged and updated automatically when the plugin version changes.
+The registered hook command uses `${HOME}/.config/zellij/plugins/zellaude-hook.sh`; Claude Code expands `${HOME}` when it runs hooks, keeping the settings entry portable across machines.
 
 All state lives in WASM memory. No temp files, no race conditions. Multiple plugin instances (one per tab) sync state automatically via inter-plugin messaging. Sessions are cleaned up automatically when tabs are closed.
 
