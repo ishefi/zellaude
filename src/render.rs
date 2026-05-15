@@ -202,6 +202,7 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
         match state.view_mode {
             ViewMode::Normal => {
                 render_tabs(state, &mut buf, &mut col, cols, last_prefix_bg, prefix_used);
+                render_remote_cluster(state, &mut buf, &mut col, cols);
             }
             ViewMode::Settings => {
                 arrow(&mut buf, &mut col, last_prefix_bg, BAR_BG);
@@ -452,6 +453,32 @@ fn render_tabs(
     // Arrow from last tab → bar background (only if we rendered any tabs)
     if prev_bg != prefix_bg || count > 0 {
         arrow(buf, col, prev_bg, BAR_BG);
+    }
+}
+
+fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, cols: usize) {
+    let bar_bg_str = bg(BAR_BG.0, BAR_BG.1, BAR_BG.2);
+    let dim_red = fg(200, 100, 100);
+    let max_len = state.settings.remote_name_max_len.max(1);
+    for remote in state.remote_sessions.values() {
+        if !remote
+            .sessions
+            .values()
+            .any(|s| matches!(s.activity, Activity::Waiting))
+        {
+            continue;
+        }
+        let name: String = remote.session_name.chars().take(max_len).collect();
+        // Layout: " ↗ <name> ⚠ " — 6 fixed cols + name width.
+        let needed = 6 + display_width(&name);
+        if *col + needed >= cols {
+            return;
+        }
+        let _ = write!(
+            buf,
+            "{bar_bg_str}{dim_red} \u{2197} {name} \u{26A0} {RESET}"
+        );
+        *col += needed;
     }
 }
 

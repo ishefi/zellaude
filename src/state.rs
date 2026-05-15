@@ -45,6 +45,13 @@ pub struct SessionInfo {
     pub last_ts_ms: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RemoteFile {
+    pub session_name: String,
+    pub sessions: BTreeMap<u32, SessionInfo>,
+    pub wrote_at_ms: u64,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct HookPayload {
     pub session_id: Option<String>,
@@ -108,6 +115,7 @@ pub struct Settings {
     pub flash: FlashMode,
     pub elapsed_time: bool,
     pub mode_indicator: bool,
+    pub remote_name_max_len: usize,
 }
 
 impl Default for Settings {
@@ -117,6 +125,7 @@ impl Default for Settings {
             flash: FlashMode::Once,
             elapsed_time: true,
             mode_indicator: true,
+            remote_name_max_len: 12,
         }
     }
 }
@@ -166,4 +175,8 @@ pub struct State {
     pub menu_click_regions: Vec<MenuClickRegion>,
     pub config_loaded: bool,
     pub hooks_installed: bool,
+    pub remote_sessions: BTreeMap<String, RemoteFile>,
+    pub state_dirty: bool,
+    pub last_write_ms: u64,
+    pub last_poll_ms: u64,
 }
