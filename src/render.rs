@@ -559,7 +559,7 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
             continue;
         };
         let name: String = remote.session_name.chars().take(max_len).collect();
-        // Layout: " ↗ <name> ⚠ " — 6 fixed cols + name width.
+        // Layout: " ↗ <name> <icon> " — 6 fixed cols + name width.
         let needed = 6 + display_width(&name);
         if *col + needed >= tag_budget {
             // Stop, but fall through so the overflow chip can still render
@@ -567,14 +567,14 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
             overflow_start = idx;
             break;
         }
-        let chip_fg = match kind {
-            RemoteTagKind::Waiting => &dim_red,
-            RemoteTagKind::Done => &dim_green,
+        let (chip_fg, icon) = match kind {
+            RemoteTagKind::Waiting => (&dim_red, "\u{26A0}"),
+            RemoteTagKind::Done => (&dim_green, "\u{2713}"),
         };
         let region_start = *col;
         let _ = write!(
             buf,
-            "{bar_bg_str}{chip_fg} \u{2197} {name} \u{26A0} {RESET}"
+            "{bar_bg_str}{chip_fg} \u{2197} {name} {icon} {RESET}"
         );
         *col += needed;
         state.remote_tag_click_regions.push(RemoteTagClickRegion {
