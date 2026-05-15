@@ -1,6 +1,6 @@
 use crate::state::{
     unix_now, unix_now_ms, Activity, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
-    NotifyMode, SessionInfo, SettingKey, State, ViewMode,
+    NotifyMode, RemoteTagClickRegion, SessionInfo, SettingKey, State, ViewMode,
 };
 use std::fmt::Write;
 use std::io::Write as IoWrite;
@@ -164,6 +164,7 @@ fn mode_style(mode: InputMode) -> (Color, &'static str) {
 pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     state.click_regions.clear();
     state.menu_click_regions.clear();
+    state.remote_tag_click_regions.clear();
 
     let mut buf = String::with_capacity(cols * 4);
     // BEL (\x07) for pending notification beeps. Every plugin instance queues
@@ -532,24 +533,58 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
     let bar_bg_str = bg(BAR_BG.0, BAR_BG.1, BAR_BG.2);
     let dim_red = fg(200, 100, 100);
     let max_len = state.settings.remote_name_max_len.max(1);
-    for remote in state.remote_sessions.values() {
-        if !remote
-            .sessions
-            .values()
-            .any(|s| matches!(s.activity, Activity::Waiting))
-        {
-            continue;
+    let cap = state.settings.max_remote_tags.max(1);
+
+    let total = state.remote_tag_order.len();
+    // Reserve room for the worst-case overflow chip up front so a narrow
+    // terminal doesn't drop both the tags AND the indicator. Since the actual
+    // chip text is `+{total - shown}` and shown ≤ cap, `total - shown` is at
+    // most `total` — using `format!(" +{total} ")` is an upper bound.
+    let chip_reserve = if total > cap {
+        format!(" +{total} ").len()
+    } else {
+        0
+    };
+    let tag_budget = cols.saturating_sub(chip_reserve);
+
+    let mut shown = 0usize;
+    for session_name in state.remote_tag_order.iter() {
+        if shown >= cap {
+            break;
         }
+        let Some(remote) = state.remote_sessions.get(session_name) else {
+            continue;
+        };
         let name: String = remote.session_name.chars().take(max_len).collect();
         // Layout: " ↗ <name> ⚠ " — 6 fixed cols + name width.
         let needed = 6 + display_width(&name);
-        if *col + needed >= cols {
-            return;
+        if *col + needed >= tag_budget {
+            // Stop, but fall through so the overflow chip can still render
+            // within the reserved budget.
+            break;
         }
+        let region_start = *col;
         let _ = write!(
             buf,
             "{bar_bg_str}{dim_red} \u{2197} {name} \u{26A0} {RESET}"
         );
+        *col += needed;
+        state.remote_tag_click_regions.push(RemoteTagClickRegion {
+            start_col: region_start,
+            end_col: *col,
+            session_name: session_name.clone(),
+        });
+        shown += 1;
+    }
+
+    if total > shown {
+        let overflow = total - shown;
+        let chip = format!(" +{overflow} ");
+        let needed = chip.len();
+        if *col + needed >= cols {
+            return;
+        }
+        let _ = write!(buf, "{bar_bg_str}{dim_red}{chip}{RESET}");
         *col += needed;
     }
 }
@@ -705,6 +740,54 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
             SettingKey::BeepEnabled,
             symbol,
             label,
+            &sym_color,
+            &label_color,
+        );
+    }
+
+    // --- Persist remote tags (bool) ---
+    {
+        let _ = write!(buf, "  ");
+        *col += 2;
+        let enabled = state.settings.persist_remote_tags;
+        let (symbol, sym_color, label_color) = if enabled {
+            ("●", fg(80, 200, 120), fg(255, 255, 255))
+        } else {
+            ("○", fg(100, 100, 100), fg(100, 100, 100))
+        };
+        let label = if enabled {
+            "Persist tags: on"
+        } else {
+            "Persist tags: off"
+        };
+        render_tristate(
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::PersistRemoteTags,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
+        );
+    }
+
+    // --- Max remote tags (cycler 1→2→3→4→1) ---
+    {
+        let _ = write!(buf, "  ");
+        *col += 2;
+        let n = state.settings.max_remote_tags.max(1);
+        let symbol = "◆";
+        let sym_color = fg(80, 200, 120);
+        let label_color = fg(255, 255, 255);
+        let label = format!("Max tags: {n}");
+        render_tristate(
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::MaxRemoteTags,
+            symbol,
+            &label,
             &sym_color,
             &label_color,
         );
