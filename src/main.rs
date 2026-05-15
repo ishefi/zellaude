@@ -225,6 +225,13 @@ impl ZellijPlugin for State {
                 }
                 if self.state_dirty && now_ms.saturating_sub(self.last_write_ms) >= 250 {
                     self.write_own_state();
+                } else if self.has_persistable_session()
+                    && now_ms.saturating_sub(self.last_write_ms) >= 10_000
+                {
+                    // Heartbeat: refresh our state file so peers don't drop us
+                    // as stale (30s threshold) while a Waiting/Done tag is
+                    // legitimately parked waiting for the user.
+                    self.write_own_state();
                 }
                 let has_flashes = self.has_active_flashes();
                 if has_flashes {
@@ -402,6 +409,15 @@ impl State {
         self.sessions.values().any(|s| {
             !matches!(s.activity, state::Activity::Idle)
                 && now.saturating_sub(s.last_event_ts) >= DONE_TIMEOUT
+        })
+    }
+
+    fn has_persistable_session(&self) -> bool {
+        self.sessions.values().any(|s| {
+            matches!(
+                s.activity,
+                state::Activity::Waiting | state::Activity::Done | state::Activity::AgentDone
+            )
         })
     }
 
