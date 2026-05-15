@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 use zellij_tile::prelude::*;
 
@@ -72,6 +72,12 @@ pub struct ClickRegion {
     pub is_waiting: bool,
 }
 
+pub struct RemoteTagClickRegion {
+    pub start_col: usize,
+    pub end_col: usize,
+    pub session_name: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub enum NotifyMode {
     Never,
@@ -117,6 +123,8 @@ pub struct Settings {
     pub mode_indicator: bool,
     pub beep_enabled: bool,
     pub remote_name_max_len: usize,
+    pub persist_remote_tags: bool,
+    pub max_remote_tags: usize,
 }
 
 impl Default for Settings {
@@ -128,6 +136,8 @@ impl Default for Settings {
             mode_indicator: true,
             beep_enabled: true,
             remote_name_max_len: 12,
+            persist_remote_tags: false,
+            max_remote_tags: 1,
         }
     }
 }
@@ -146,6 +156,8 @@ pub enum SettingKey {
     ElapsedTime,
     ModeIndicator,
     BeepEnabled,
+    PersistRemoteTags,
+    MaxRemoteTags,
 }
 
 pub enum MenuAction {
@@ -181,6 +193,8 @@ pub struct State {
     pub config_loaded: bool,
     pub hooks_installed: bool,
     pub remote_sessions: BTreeMap<String, RemoteFile>,
+    pub remote_tag_order: VecDeque<String>,
+    pub remote_tag_click_regions: Vec<RemoteTagClickRegion>,
     pub state_dirty: bool,
     pub last_write_ms: u64,
     pub last_poll_ms: u64,

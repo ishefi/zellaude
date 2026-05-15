@@ -16,7 +16,7 @@ A Zellij status bar plugin that replaces the default tab bar with Claude Code ac
 - **Desktop notifications** — macOS notification on permission requests (rate-limited to once per 10s per tab), with click-to-focus support via [terminal-notifier](https://github.com/julienXX/terminal-notifier)
 - **Elapsed time** — shows how long a session has been in its current state (after 30s), making it easy to spot stuck sessions
 - **Multi-instance sync** — all Zellij tabs show a unified view of all sessions
-- **Cross-session presence** — when attached to one Zellij session, the right edge of the bar shows a `↗ <session> ⚠` indicator for *other* Zellij sessions with a Claude pane awaiting permission, so SSH/headless users get an in-bar signal even where pop-ups can't reach
+- **Cross-session presence** — when attached to one Zellij session, the right edge of the bar shows a `↗ <session> ⚠` indicator for *other* Zellij sessions with a Claude pane awaiting permission, so SSH/headless users get an in-bar signal even where pop-ups can't reach. Multiple remotes stack side-by-side up to a configurable cap (default 1); extras roll up into a `+N` overflow chip. Optionally **persist** tags so they remain visible after the remote resolves until you click them to dismiss.
 
 ### Activity symbols
 
@@ -45,6 +45,8 @@ Click the **Zellaude** prefix on the left side of the bar to open the settings m
 | Flash | Persist / Brief / Off | Brief | Yellow flash on permission requests. "Persist" keeps flashing until resolved, "Brief" flashes for 2 seconds. |
 | Beep | On / Off | On | Terminal bell on permission requests (Waiting) and on turn completion (Stop). |
 | Elapsed time | On / Off | On | Show time since last activity (appears after 30s). |
+| Persist tags | On / Off | Off | When on, cross-session remote tags stay visible after the remote stops Waiting until you click the tag to dismiss it. |
+| Max tags | 1 / 2 / 3 / 4 | 1 | Maximum number of cross-session remote tags rendered side-by-side. Extras collapse into a `+N` overflow chip until a slot opens. |
 
 ## Install
 

@@ -85,6 +85,13 @@ impl ZellijPlugin for State {
 
                 match self.view_mode {
                     ViewMode::Normal => {
+                        for region in &self.remote_tag_click_regions {
+                            if col >= region.start_col && col < region.end_col {
+                                let name = region.session_name.clone();
+                                self.remote_tag_order.retain(|n| n != &name);
+                                return true;
+                            }
+                        }
                         for region in &self.click_regions {
                             if col >= region.start_col && col < region.end_col {
                                 if region.is_waiting {
@@ -121,6 +128,20 @@ impl ZellijPlugin for State {
                                             state::SettingKey::BeepEnabled => {
                                                 self.settings.beep_enabled =
                                                     !self.settings.beep_enabled;
+                                            }
+                                            state::SettingKey::PersistRemoteTags => {
+                                                self.settings.persist_remote_tags =
+                                                    !self.settings.persist_remote_tags;
+                                                self.reconcile_remote_tags();
+                                            }
+                                            state::SettingKey::MaxRemoteTags => {
+                                                self.settings.max_remote_tags =
+                                                    match self.settings.max_remote_tags {
+                                                        1 => 2,
+                                                        2 => 3,
+                                                        3 => 4,
+                                                        _ => 1,
+                                                    };
                                             }
                                         }
                                         self.save_config();
@@ -469,6 +490,39 @@ impl State {
                 continue;
             }
             self.remote_sessions.insert(f.session_name.clone(), f);
+        }
+        self.reconcile_remote_tags();
+    }
+
+    fn reconcile_remote_tags(&mut self) {
+        // Drop names whose remote no longer exists, or — when persistence is
+        // off — whose remote has left Waiting.
+        let persist = self.settings.persist_remote_tags;
+        self.remote_tag_order.retain(|name| {
+            let Some(remote) = self.remote_sessions.get(name) else {
+                return false;
+            };
+            if persist {
+                return true;
+            }
+            remote
+                .sessions
+                .values()
+                .any(|s| matches!(s.activity, state::Activity::Waiting))
+        });
+
+        // Add any newly-Waiting remote not yet in the queue.
+        for (name, remote) in &self.remote_sessions {
+            if self.remote_tag_order.iter().any(|n| n == name) {
+                continue;
+            }
+            let waiting = remote
+                .sessions
+                .values()
+                .any(|s| matches!(s.activity, state::Activity::Waiting));
+            if waiting {
+                self.remote_tag_order.push_back(name.clone());
+            }
         }
     }
 }
