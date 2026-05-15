@@ -39,14 +39,16 @@ A Zellij status bar plugin that replaces the default tab bar with Claude Code ac
 
 Click the **Zellaude** prefix on the left side of the bar to open the settings menu. Click it again (or the `×` button) to close. Settings are persisted to `~/.config/zellij/plugins/zellaude.json`.
 
-| Setting | Options | Default | Description |
-|---------|---------|---------|-------------|
-| Notifications | Always / Unfocused / Off | Always | Desktop notifications on permission requests. "Unfocused" only notifies when the requesting pane is on a different tab. |
-| Flash | Persist / Brief / Off | Brief | Yellow flash on permission requests. "Persist" keeps flashing until resolved, "Brief" flashes for 2 seconds. |
-| Beep | On / Off | On | Terminal bell on permission requests (Waiting) and on turn completion (Stop). |
-| Elapsed time | On / Off | On | Show time since last activity (appears after 30s). |
-| Persist tags | On / Off | Off | When on, cross-session remote tags stay visible after the remote leaves the Waiting/Done state until you click the tag to dismiss it. |
-| Max tags | 1 / 2 / 3 / 4 | 1 | Maximum number of cross-session remote tags rendered side-by-side. Extras collapse into a `+N` overflow chip until a slot opens. |
+| Setting | JSON key | Options | Default | Description |
+|---------|----------|---------|---------|-------------|
+| Notifications | `notifications` | `Always` / `Unfocused` / `Never` | `Always` | Desktop notifications on permission requests. "Unfocused" only notifies when the requesting pane is on a different tab. |
+| Flash | `flash` | `Persist` / `Once` / `Off` | `Once` | Yellow flash on permission requests. "Persist" keeps flashing until resolved, "Once" flashes for 2 seconds. |
+| Beep | `beep_enabled` | `true` / `false` | `true` | Terminal bell on permission requests (Waiting) and on turn completion (Stop). |
+| Elapsed time | `elapsed_time` | `true` / `false` | `true` | Show time since last activity (appears after 30s). |
+| Mode indicator | `mode_indicator` | `true` / `false` | `true` | Show the Zellij input-mode pill (NORMAL/LOCKED/PANE/…) next to the Zellaude prefix. |
+| Persist tags | `persist_remote_tags` | `true` / `false` | `false` | When on, cross-session remote tags stay visible after the remote leaves the Waiting/Done state until you click the tag to dismiss it. |
+| Max tags | `max_remote_tags` | `1` / `2` / `3` / `4` | `1` | Maximum number of cross-session remote tags rendered side-by-side. Extras collapse into a `+N` overflow chip until a slot opens. |
+| Remote name max length | `remote_name_max_len` | positive integer | `12` | Maximum characters of a remote session name shown in a cross-session tag before truncation. JSON-only — no menu toggle. |
 
 ## Install
 
