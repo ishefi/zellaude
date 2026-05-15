@@ -549,8 +549,10 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
     let tag_budget = cols.saturating_sub(chip_reserve);
 
     let mut shown = 0usize;
-    for (session_name, kind) in state.remote_tag_order.iter() {
+    let mut overflow_start = state.remote_tag_order.len();
+    for (idx, (session_name, kind)) in state.remote_tag_order.iter().enumerate() {
         if shown >= cap {
+            overflow_start = idx;
             break;
         }
         let Some(remote) = state.remote_sessions.get(session_name) else {
@@ -562,6 +564,7 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
         if *col + needed >= tag_budget {
             // Stop, but fall through so the overflow chip can still render
             // within the reserved budget.
+            overflow_start = idx;
             break;
         }
         let chip_fg = match kind {
@@ -590,7 +593,20 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
         if *col + needed >= cols {
             return;
         }
-        let _ = write!(buf, "{bar_bg_str}{dim_red}{chip}{RESET}");
+        // Escalate to the most urgent hidden kind: red if any Waiting is
+        // hidden, green otherwise. Avoids falsely implying hidden Waiting
+        // tags when only Done tags overflow.
+        let any_hidden_waiting = state
+            .remote_tag_order
+            .iter()
+            .skip(overflow_start)
+            .any(|(_, kind)| matches!(kind, RemoteTagKind::Waiting));
+        let chip_fg = if any_hidden_waiting {
+            &dim_red
+        } else {
+            &dim_green
+        };
+        let _ = write!(buf, "{bar_bg_str}{chip_fg}{chip}{RESET}");
         *col += needed;
     }
 }

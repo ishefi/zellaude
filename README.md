@@ -45,7 +45,7 @@ Click the **Zellaude** prefix on the left side of the bar to open the settings m
 | Flash | Persist / Brief / Off | Brief | Yellow flash on permission requests. "Persist" keeps flashing until resolved, "Brief" flashes for 2 seconds. |
 | Beep | On / Off | On | Terminal bell on permission requests (Waiting) and on turn completion (Stop). |
 | Elapsed time | On / Off | On | Show time since last activity (appears after 30s). |
-| Persist tags | On / Off | Off | When on, cross-session remote tags stay visible after the remote stops Waiting (or stops being Done) until you click the tag to dismiss it. |
+| Persist tags | On / Off | Off | When on, cross-session remote tags stay visible after the remote leaves the Waiting/Done state until you click the tag to dismiss it. |
 | Max tags | 1 / 2 / 3 / 4 | 1 | Maximum number of cross-session remote tags rendered side-by-side. Extras collapse into a `+N` overflow chip until a slot opens. |
 
 ## Install

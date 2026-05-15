@@ -88,8 +88,8 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
 
     let entered_waiting =
         matches!(activity, Activity::Waiting) && !matches!(session.activity, Activity::Waiting);
-    let entered_done =
-        matches!(activity, Activity::Done) && !matches!(session.activity, Activity::Done);
+    let entered_done = matches!(activity, Activity::Done | Activity::AgentDone)
+        && !matches!(session.activity, Activity::Done | Activity::AgentDone);
 
     session.activity = activity;
     session.last_event_ts = crate::state::unix_now();

@@ -202,9 +202,9 @@ pub struct State {
     pub remote_sessions: BTreeMap<String, RemoteFile>,
     pub remote_tag_order: VecDeque<(String, RemoteTagKind)>,
     /// (Name, kind) pairs dismissed via click. Suppresses re-adding to the
-    /// queue until the remote leaves the matching activity state at least
-    /// once — without this, a click on a still-Waiting remote pops back
-    /// ~1s later via reconcile.
+    /// queue until the remote leaves the matching activity state (Waiting
+    /// or Done/AgentDone) at least once — without this, a click on a
+    /// remote still in the matching state pops back ~1s later via reconcile.
     pub remote_tag_dismissed: HashSet<(String, RemoteTagKind)>,
     pub remote_tag_click_regions: Vec<RemoteTagClickRegion>,
     pub state_dirty: bool,
