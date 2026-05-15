@@ -166,6 +166,22 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     state.menu_click_regions.clear();
 
     let mut buf = String::with_capacity(cols * 4);
+    // BEL (\x07) for pending notification beeps. Every plugin instance queues
+    // its own beep when a hook arrives, but only the instance whose tab is
+    // active should actually emit — otherwise a queued beep would fire later
+    // when the user switches to that tab, long after the event. Always drain
+    // the set so entries don't accumulate across renders.
+    let beep = state.settings.beep_enabled
+        && state.beep_pending.iter().any(|pane_id| {
+            state
+                .pane_to_tab
+                .get(pane_id)
+                .is_some_and(|(tab_idx, _)| Some(*tab_idx) == state.active_tab_index)
+        });
+    state.beep_pending.clear();
+    if beep {
+        buf.push('\x07');
+    }
     // Terminal setup for a 1-row status bar:
     //  \x1b[H     — cursor home (prevent scroll from cursor at end-of-line)
     //  \x1b[?7l   — disable auto-wrap (clip overflow instead of scroll)
@@ -664,6 +680,29 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
             col,
             &mut state.menu_click_regions,
             SettingKey::ModeIndicator,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
+        );
+    }
+
+    // --- Beep (bool) ---
+    {
+        let _ = write!(buf, "  ");
+        *col += 2;
+        let enabled = state.settings.beep_enabled;
+        let (symbol, sym_color, label_color) = if enabled {
+            ("●", fg(80, 200, 120), fg(255, 255, 255))
+        } else {
+            ("○", fg(100, 100, 100), fg(100, 100, 100))
+        };
+        let label = if enabled { "Beep: on" } else { "Beep: off" };
+        render_tristate(
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::BeepEnabled,
             symbol,
             label,
             &sym_color,

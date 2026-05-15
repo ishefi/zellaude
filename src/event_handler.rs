@@ -86,6 +86,11 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
         state.flash_deadlines.remove(&payload.pane_id);
     }
 
+    let entered_waiting =
+        matches!(activity, Activity::Waiting) && !matches!(session.activity, Activity::Waiting);
+    let entered_done =
+        matches!(activity, Activity::Done) && !matches!(session.activity, Activity::Done);
+
     session.activity = activity;
     session.last_event_ts = crate::state::unix_now();
     if let Some(ts_ms) = payload.ts_ms {
@@ -102,4 +107,8 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
         session.tab_name = Some(name);
     }
     state.state_dirty = true;
+
+    if entered_waiting || entered_done {
+        state.beep_pending.insert(payload.pane_id);
+    }
 }

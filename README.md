@@ -12,6 +12,7 @@ A Zellij status bar plugin that replaces the default tab bar with Claude Code ac
 - **Clickable tabs** — click any tab to switch to it
 - **Smart pane focus** — clicking a waiting (⚠) session focuses the exact pane so you can respond to the permission prompt immediately
 - **Permission flash** — sessions pulse bright yellow for 2 seconds when a permission request arrives
+- **Audible bell** — terminal bell (`\x07`) on permission requests and when a session finishes a turn, so you don't miss notifications while focused elsewhere
 - **Desktop notifications** — macOS notification on permission requests (rate-limited to once per 10s per tab), with click-to-focus support via [terminal-notifier](https://github.com/julienXX/terminal-notifier)
 - **Elapsed time** — shows how long a session has been in its current state (after 30s), making it easy to spot stuck sessions
 - **Multi-instance sync** — all Zellij tabs show a unified view of all sessions
@@ -42,6 +43,7 @@ Click the **Zellaude** prefix on the left side of the bar to open the settings m
 |---------|---------|---------|-------------|
 | Notifications | Always / Unfocused / Off | Always | Desktop notifications on permission requests. "Unfocused" only notifies when the requesting pane is on a different tab. |
 | Flash | Persist / Brief / Off | Brief | Yellow flash on permission requests. "Persist" keeps flashing until resolved, "Brief" flashes for 2 seconds. |
+| Beep | On / Off | On | Terminal bell on permission requests (Waiting) and on turn completion (Stop). |
 | Elapsed time | On / Off | On | Show time since last activity (appears after 30s). |
 
 ## Install
