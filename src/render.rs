@@ -166,6 +166,13 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     state.menu_click_regions.clear();
 
     let mut buf = String::with_capacity(cols * 4);
+    // BEL (\x07) for pending notification beeps. Emitted before terminal
+    // setup escapes so it isn't swallowed by parser state changes.
+    let beep = state.settings.beep_enabled && !state.beep_pending.is_empty();
+    state.beep_pending.clear();
+    if beep {
+        buf.push('\x07');
+    }
     // Terminal setup for a 1-row status bar:
     //  \x1b[H     — cursor home (prevent scroll from cursor at end-of-line)
     //  \x1b[?7l   — disable auto-wrap (clip overflow instead of scroll)
@@ -664,6 +671,29 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
             col,
             &mut state.menu_click_regions,
             SettingKey::ModeIndicator,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
+        );
+    }
+
+    // --- Beep (bool) ---
+    {
+        let _ = write!(buf, "  ");
+        *col += 2;
+        let enabled = state.settings.beep_enabled;
+        let (symbol, sym_color, label_color) = if enabled {
+            ("●", fg(80, 200, 120), fg(255, 255, 255))
+        } else {
+            ("○", fg(100, 100, 100), fg(100, 100, 100))
+        };
+        let label = if enabled { "Beep: on" } else { "Beep: off" };
+        render_tristate(
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::BeepEnabled,
             symbol,
             label,
             &sym_color,

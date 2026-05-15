@@ -115,6 +115,7 @@ pub struct Settings {
     pub flash: FlashMode,
     pub elapsed_time: bool,
     pub mode_indicator: bool,
+    pub beep_enabled: bool,
     pub remote_name_max_len: usize,
 }
 
@@ -125,6 +126,7 @@ impl Default for Settings {
             flash: FlashMode::Once,
             elapsed_time: true,
             mode_indicator: true,
+            beep_enabled: true,
             remote_name_max_len: 12,
         }
     }
@@ -143,6 +145,7 @@ pub enum SettingKey {
     Flash,
     ElapsedTime,
     ModeIndicator,
+    BeepEnabled,
 }
 
 pub enum MenuAction {
@@ -166,6 +169,8 @@ pub struct State {
     pub click_regions: Vec<ClickRegion>,
     /// pane_id -> flash deadline in ms (for waiting animation)
     pub flash_deadlines: HashMap<u32, u64>,
+    /// pane_ids that should emit a terminal bell on the next render
+    pub beep_pending: std::collections::HashSet<u32>,
     pub zellij_session_name: Option<String>,
     pub term_program: Option<String>,
     pub input_mode: InputMode,

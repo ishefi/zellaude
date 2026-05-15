@@ -118,6 +118,10 @@ impl ZellijPlugin for State {
                                                 self.settings.mode_indicator =
                                                     !self.settings.mode_indicator;
                                             }
+                                            state::SettingKey::BeepEnabled => {
+                                                self.settings.beep_enabled =
+                                                    !self.settings.beep_enabled;
+                                            }
                                         }
                                         self.save_config();
                                     }
