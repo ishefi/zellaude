@@ -4,7 +4,10 @@ mod render;
 mod state;
 mod tab_pane_map;
 
-use state::{unix_now, unix_now_ms, HookPayload, MenuAction, SessionInfo, Settings, State, ViewMode};
+use state::{
+    unix_now, unix_now_ms, HookPayload, MenuAction, RemoteFile, SessionInfo, Settings, State,
+    ViewMode,
+};
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
@@ -144,12 +147,25 @@ impl ZellijPlugin for State {
                         self.hooks_installed = true;
                         false
                     }
+                    Some("poll_remote") if exit_code == Some(0) => {
+                        let raw = String::from_utf8_lossy(&stdout);
+                        self.merge_remote_state(&raw);
+                        true
+                    }
+                    Some("write_state") => false,
                     _ => false,
                 }
             }
             Event::Timer(_) => {
                 let stale_changed = self.cleanup_stale_sessions();
                 let flash_changed = self.cleanup_expired_flashes();
+                let now_ms = unix_now_ms();
+                if now_ms.saturating_sub(self.last_poll_ms) >= 1000 {
+                    self.poll_remote_state();
+                }
+                if self.state_dirty && now_ms.saturating_sub(self.last_write_ms) >= 250 {
+                    self.write_own_state();
+                }
                 let has_flashes = self.has_active_flashes();
                 if has_flashes {
                     set_timeout(FLASH_TICK);
@@ -374,7 +390,80 @@ impl State {
                     session.tab_name = Some(name.clone());
                 }
                 self.sessions.insert(pane_id, session);
+                self.state_dirty = true;
             }
+        }
+    }
+
+    fn sanitize_session_name(name: &str) -> String {
+        name.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    }
+
+    fn write_own_state(&mut self) {
+        let Some(name) = self.zellij_session_name.clone() else {
+            return;
+        };
+        let safe = Self::sanitize_session_name(&name);
+        let payload = RemoteFile {
+            session_name: name,
+            sessions: self.sessions.clone(),
+            wrote_at_ms: unix_now_ms(),
+        };
+        let Ok(json) = serde_json::to_string(&payload) else {
+            return;
+        };
+        let json_esc = json.replace('\'', "'\\''");
+        let cmd = format!(
+            "DIR=\"$HOME/.config/zellij/plugins/zellaude-state.d\" && \
+             mkdir -p \"$DIR\" && \
+             printf '%s' '{json_esc}' > \"$DIR/{safe}.json.tmp\" && \
+             mv \"$DIR/{safe}.json.tmp\" \"$DIR/{safe}.json\""
+        );
+        let mut ctx = BTreeMap::new();
+        ctx.insert("type".into(), "write_state".into());
+        run_command(&["sh", "-c", &cmd], ctx);
+        self.last_write_ms = unix_now_ms();
+        self.state_dirty = false;
+    }
+
+    fn poll_remote_state(&mut self) {
+        // Portable across GNU and BSD shells: avoid `xargs -r`.
+        // The `if [ -n "$(ls ...)" ]` guard returns `[]` when the dir is empty
+        // or missing, instead of letting jq see a literal `*.json`.
+        let cmd = "DIR=\"$HOME/.config/zellij/plugins/zellaude-state.d\"; \
+                   { if [ -n \"$(ls \"$DIR\"/*.json 2>/dev/null)\" ]; then \
+                       jq -s '.' \"$DIR\"/*.json; \
+                     else echo '[]'; fi; } 2>/dev/null";
+        let mut ctx = BTreeMap::new();
+        ctx.insert("type".into(), "poll_remote".into());
+        run_command(&["sh", "-c", cmd], ctx);
+        self.last_poll_ms = unix_now_ms();
+    }
+
+    fn merge_remote_state(&mut self, raw: &str) {
+        let Ok(files) = serde_json::from_str::<Vec<RemoteFile>>(raw.trim()) else {
+            return;
+        };
+        let now_ms = unix_now_ms();
+        let own = self.zellij_session_name.as_deref();
+        self.remote_sessions.clear();
+        for f in files {
+            if Some(f.session_name.as_str()) == own {
+                continue;
+            }
+            if f.wrote_at_ms + 30_000 < now_ms {
+                continue;
+            }
+            self.remote_sessions
+                .insert(Self::sanitize_session_name(&f.session_name), f);
         }
     }
 }

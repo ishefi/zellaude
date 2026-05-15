@@ -45,6 +45,13 @@ pub struct SessionInfo {
     pub last_ts_ms: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteFile {
+    pub session_name: String,
+    pub sessions: BTreeMap<u32, SessionInfo>,
+    pub wrote_at_ms: u64,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct HookPayload {
     pub session_id: Option<String>,
@@ -166,4 +173,8 @@ pub struct State {
     pub menu_click_regions: Vec<MenuClickRegion>,
     pub config_loaded: bool,
     pub hooks_installed: bool,
+    pub remote_sessions: BTreeMap<String, RemoteFile>,
+    pub state_dirty: bool,
+    pub last_write_ms: u64,
+    pub last_poll_ms: u64,
 }

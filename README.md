@@ -15,6 +15,7 @@ A Zellij status bar plugin that replaces the default tab bar with Claude Code ac
 - **Desktop notifications** — macOS notification on permission requests (rate-limited to once per 10s per tab), with click-to-focus support via [terminal-notifier](https://github.com/julienXX/terminal-notifier)
 - **Elapsed time** — shows how long a session has been in its current state (after 30s), making it easy to spot stuck sessions
 - **Multi-instance sync** — all Zellij tabs show a unified view of all sessions
+- **Cross-session presence** — when attached to one Zellij session, the right edge of the bar shows a `↗ <session> ⚠` indicator for *other* Zellij sessions with a Claude pane awaiting permission, so SSH/headless users get an in-bar signal even where pop-ups can't reach
 
 ### Activity symbols
 
@@ -123,7 +124,7 @@ Claude Code hook → zellaude-hook.sh → zellij pipe → plugin → render
 
 The hook script and registration are version-tagged and updated automatically when the plugin version changes.
 
-All state lives in WASM memory. No temp files, no race conditions. Multiple plugin instances (one per tab) sync state automatically via inter-plugin messaging. Sessions are cleaned up automatically when tabs are closed.
+Plugin instances within the same Zellij server sync via inter-plugin messaging. Across Zellij servers (different sessions), each instance writes its own state to `~/.config/zellij/plugins/zellaude-state.d/<session>.json` and polls peers' files every second — that's how the right-edge cross-session indicator works. Stale entries (>30s) are dropped; writes are coalesced (≤4/sec). Sessions are cleaned up automatically when tabs are closed.
 
 ## License
 
