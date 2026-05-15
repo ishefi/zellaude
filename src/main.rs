@@ -5,8 +5,8 @@ mod state;
 mod tab_pane_map;
 
 use state::{
-    unix_now, unix_now_ms, HookPayload, MenuAction, RemoteFile, SessionInfo, Settings, State,
-    ViewMode,
+    unix_now, unix_now_ms, HookPayload, MenuAction, RemoteFile, RemoteTagKind, SessionInfo,
+    Settings, State, ViewMode,
 };
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
@@ -16,6 +16,40 @@ const TIMER_INTERVAL: f64 = 1.0;
 const FLASH_TICK: f64 = 0.25;
 
 register_plugin!(State);
+
+fn dismiss_kind_str(kind: RemoteTagKind) -> &'static str {
+    match kind {
+        RemoteTagKind::Waiting => "waiting",
+        RemoteTagKind::Done => "done",
+    }
+}
+
+fn parse_dismiss_payload(payload: &str) -> Option<(RemoteTagKind, String)> {
+    let payload = payload.trim();
+    let (prefix, name) = payload.split_once(':')?;
+    let kind = match prefix {
+        "waiting" => RemoteTagKind::Waiting,
+        "done" => RemoteTagKind::Done,
+        _ => return None,
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some((kind, name.to_string()))
+}
+
+fn remote_in_state(remote: &RemoteFile, kind: RemoteTagKind) -> bool {
+    remote.sessions.values().any(|s| match kind {
+        RemoteTagKind::Waiting => matches!(s.activity, state::Activity::Waiting),
+        RemoteTagKind::Done => {
+            matches!(
+                s.activity,
+                state::Activity::Done | state::Activity::AgentDone
+            )
+        }
+    })
+}
 
 impl ZellijPlugin for State {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
@@ -87,7 +121,7 @@ impl ZellijPlugin for State {
                     ViewMode::Normal => {
                         for region in &self.remote_tag_click_regions {
                             if col >= region.start_col && col < region.end_col {
-                                self.broadcast_dismiss_tag(&region.session_name);
+                                self.broadcast_dismiss_tag(&region.session_name, region.kind);
                                 return false;
                             }
                         }
@@ -275,11 +309,13 @@ impl ZellijPlugin for State {
             "zellaude:dismiss-tag" => {
                 // Another instance (or this one's click handler) is dismissing
                 // a remote tag. Apply locally so every tab in the server agrees.
-                if let Some(ref name) = pipe_message.payload {
-                    let name = name.trim();
-                    self.remote_tag_order.retain(|n| n != name);
-                    self.remote_tag_dismissed.insert(name.to_string());
-                    return true;
+                if let Some(ref payload) = pipe_message.payload {
+                    if let Some((kind, name)) = parse_dismiss_payload(payload) {
+                        let key = (name, kind);
+                        self.remote_tag_order.retain(|entry| entry != &key);
+                        self.remote_tag_dismissed.insert(key);
+                        return true;
+                    }
                 }
                 false
             }
@@ -385,9 +421,9 @@ impl State {
         pipe_message_to_plugin(msg);
     }
 
-    fn broadcast_dismiss_tag(&self, session_name: &str) {
+    fn broadcast_dismiss_tag(&self, session_name: &str, kind: RemoteTagKind) {
         let mut msg = MessageToPlugin::new("zellaude:dismiss-tag");
-        msg.message_payload = Some(session_name.to_string());
+        msg.message_payload = Some(format!("{}:{}", dismiss_kind_str(kind), session_name));
         pipe_message_to_plugin(msg);
     }
 
@@ -511,47 +547,43 @@ impl State {
     }
 
     fn reconcile_remote_tags(&mut self) {
-        // Drop "dismissed" markers once the remote leaves Waiting (or
-        // disappears) — that gates the user-click suppression so the next
-        // Waiting event for the same remote re-shows the tag.
-        self.remote_tag_dismissed.retain(|name| {
-            self.remote_sessions.get(name).is_some_and(|r| {
-                r.sessions
-                    .values()
-                    .any(|s| matches!(s.activity, state::Activity::Waiting))
-            })
+        // Drop "dismissed" markers once the remote leaves the matching state
+        // (or disappears) — that gates user-click suppression so the next
+        // matching event for the same remote re-shows the tag.
+        self.remote_tag_dismissed.retain(|(name, kind)| {
+            self.remote_sessions
+                .get(name)
+                .is_some_and(|r| remote_in_state(r, *kind))
         });
 
-        // Drop names whose remote no longer exists, or — when persistence is
-        // off — whose remote has left Waiting.
+        // Drop entries whose remote no longer exists, or — when persistence
+        // is off — whose remote has left the matching state.
         let persist = self.settings.persist_remote_tags;
-        self.remote_tag_order.retain(|name| {
+        self.remote_tag_order.retain(|(name, kind)| {
             let Some(remote) = self.remote_sessions.get(name) else {
                 return false;
             };
             if persist {
                 return true;
             }
-            remote
-                .sessions
-                .values()
-                .any(|s| matches!(s.activity, state::Activity::Waiting))
+            remote_in_state(remote, *kind)
         });
 
-        // Add any newly-Waiting remote not yet in the queue and not dismissed.
-        for (name, remote) in &self.remote_sessions {
-            if self.remote_tag_order.iter().any(|n| n == name) {
-                continue;
-            }
-            if self.remote_tag_dismissed.contains(name) {
-                continue;
-            }
-            let waiting = remote
-                .sessions
-                .values()
-                .any(|s| matches!(s.activity, state::Activity::Waiting));
-            if waiting {
-                self.remote_tag_order.push_back(name.clone());
+        // Add any newly-matching remote not yet in the queue and not dismissed.
+        // Iterate Waiting first so a remote that flips Waiting→Done in one
+        // poll cycle gets the more urgent tag enqueued ahead of the other.
+        for kind in [RemoteTagKind::Waiting, RemoteTagKind::Done] {
+            for (name, remote) in &self.remote_sessions {
+                let key = (name.clone(), kind);
+                if self.remote_tag_order.iter().any(|entry| entry == &key) {
+                    continue;
+                }
+                if self.remote_tag_dismissed.contains(&key) {
+                    continue;
+                }
+                if remote_in_state(remote, kind) {
+                    self.remote_tag_order.push_back(key);
+                }
             }
         }
     }
