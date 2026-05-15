@@ -16,7 +16,7 @@ A Zellij status bar plugin that replaces the default tab bar with Claude Code ac
 - **Desktop notifications** — macOS notification on permission requests (rate-limited to once per 10s per tab), with click-to-focus support via [terminal-notifier](https://github.com/julienXX/terminal-notifier)
 - **Elapsed time** — shows how long a session has been in its current state (after 30s), making it easy to spot stuck sessions
 - **Multi-instance sync** — all Zellij tabs show a unified view of all sessions
-- **Cross-session presence** — when attached to one Zellij session, the right edge of the bar shows a `↗ <session> ⚠` indicator for *other* Zellij sessions with a Claude pane awaiting permission, so SSH/headless users get an in-bar signal even where pop-ups can't reach. Multiple remotes stack side-by-side up to a configurable cap (default 1); extras roll up into a `+N` overflow chip. Optionally **persist** tags so they remain visible after the remote resolves until you click them to dismiss.
+- **Cross-session presence** — when attached to one Zellij session, the right edge of the bar shows a `↗ <session> ⚠` indicator for *other* Zellij sessions with a Claude pane awaiting permission, so SSH/headless users get an in-bar signal even where pop-ups can't reach. Multiple remotes stack side-by-side up to a configurable cap (default 1, was unbounded prior to this version); extras roll up into a `+N` overflow chip. Optionally **persist** tags so they remain visible after the remote resolves until you click them to dismiss. Persisted tags do *not* survive a Zellij restart — they live in plugin memory only.
 
 ### Activity symbols
 

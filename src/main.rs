@@ -87,9 +87,8 @@ impl ZellijPlugin for State {
                     ViewMode::Normal => {
                         for region in &self.remote_tag_click_regions {
                             if col >= region.start_col && col < region.end_col {
-                                let name = region.session_name.clone();
-                                self.remote_tag_order.retain(|n| n != &name);
-                                return true;
+                                self.broadcast_dismiss_tag(&region.session_name);
+                                return false;
                             }
                         }
                         for region in &self.click_regions {
@@ -273,6 +272,17 @@ impl ZellijPlugin for State {
                 }
                 false
             }
+            "zellaude:dismiss-tag" => {
+                // Another instance (or this one's click handler) is dismissing
+                // a remote tag. Apply locally so every tab in the server agrees.
+                if let Some(ref name) = pipe_message.payload {
+                    let name = name.trim();
+                    self.remote_tag_order.retain(|n| n != name);
+                    self.remote_tag_dismissed.insert(name.to_string());
+                    return true;
+                }
+                false
+            }
             _ => false,
         }
     }
@@ -372,6 +382,12 @@ impl State {
     fn broadcast_settings(&self) {
         let mut msg = MessageToPlugin::new("zellaude:settings");
         msg.message_payload = Some(serde_json::to_string(&self.settings).unwrap_or_default());
+        pipe_message_to_plugin(msg);
+    }
+
+    fn broadcast_dismiss_tag(&self, session_name: &str) {
+        let mut msg = MessageToPlugin::new("zellaude:dismiss-tag");
+        msg.message_payload = Some(session_name.to_string());
         pipe_message_to_plugin(msg);
     }
 
@@ -495,6 +511,17 @@ impl State {
     }
 
     fn reconcile_remote_tags(&mut self) {
+        // Drop "dismissed" markers once the remote leaves Waiting (or
+        // disappears) — that gates the user-click suppression so the next
+        // Waiting event for the same remote re-shows the tag.
+        self.remote_tag_dismissed.retain(|name| {
+            self.remote_sessions.get(name).is_some_and(|r| {
+                r.sessions
+                    .values()
+                    .any(|s| matches!(s.activity, state::Activity::Waiting))
+            })
+        });
+
         // Drop names whose remote no longer exists, or — when persistence is
         // off — whose remote has left Waiting.
         let persist = self.settings.persist_remote_tags;
@@ -511,9 +538,12 @@ impl State {
                 .any(|s| matches!(s.activity, state::Activity::Waiting))
         });
 
-        // Add any newly-Waiting remote not yet in the queue.
+        // Add any newly-Waiting remote not yet in the queue and not dismissed.
         for (name, remote) in &self.remote_sessions {
             if self.remote_tag_order.iter().any(|n| n == name) {
+                continue;
+            }
+            if self.remote_tag_dismissed.contains(name) {
                 continue;
             }
             let waiting = remote

@@ -536,6 +536,17 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
     let cap = state.settings.max_remote_tags.max(1);
 
     let total = state.remote_tag_order.len();
+    // Reserve room for the worst-case overflow chip up front so a narrow
+    // terminal doesn't drop both the tags AND the indicator. Since the actual
+    // chip text is `+{total - shown}` and shown ≤ cap, `total - shown` is at
+    // most `total` — using `format!(" +{total} ")` is an upper bound.
+    let chip_reserve = if total > cap {
+        format!(" +{total} ").len()
+    } else {
+        0
+    };
+    let tag_budget = cols.saturating_sub(chip_reserve);
+
     let mut shown = 0usize;
     for session_name in state.remote_tag_order.iter() {
         if shown >= cap {
@@ -547,8 +558,10 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
         let name: String = remote.session_name.chars().take(max_len).collect();
         // Layout: " ↗ <name> ⚠ " — 6 fixed cols + name width.
         let needed = 6 + display_width(&name);
-        if *col + needed >= cols {
-            return;
+        if *col + needed >= tag_budget {
+            // Stop, but fall through so the overflow chip can still render
+            // within the reserved budget.
+            break;
         }
         let region_start = *col;
         let _ = write!(
@@ -567,7 +580,7 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
     if total > shown {
         let overflow = total - shown;
         let chip = format!(" +{overflow} ");
-        let needed = display_width(&chip);
+        let needed = chip.len();
         if *col + needed >= cols {
             return;
         }
