@@ -115,6 +115,7 @@ pub struct Settings {
     pub flash: FlashMode,
     pub elapsed_time: bool,
     pub mode_indicator: bool,
+    pub remote_name_max_len: usize,
 }
 
 impl Default for Settings {
@@ -124,6 +125,7 @@ impl Default for Settings {
             flash: FlashMode::Once,
             elapsed_time: true,
             mode_indicator: true,
+            remote_name_max_len: 12,
         }
     }
 }

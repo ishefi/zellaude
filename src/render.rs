@@ -466,6 +466,7 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
         .remote_sessions
         .retain(|_, f| f.wrote_at_ms + 30_000 >= now_ms);
 
+    let max_len = state.settings.remote_name_max_len.max(1);
     for remote in state.remote_sessions.values() {
         if !remote
             .sessions
@@ -474,7 +475,7 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
         {
             continue;
         }
-        let name: String = remote.session_name.chars().take(12).collect();
+        let name: String = remote.session_name.chars().take(max_len).collect();
         // Layout: " ↗ <name> ⚠ " — 6 fixed cols + name width.
         let needed = 6 + display_width(&name);
         if *col + needed >= cols {
