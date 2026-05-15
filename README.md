@@ -43,12 +43,12 @@ Click the **Zellaude** prefix on the left side of the bar to open the settings m
 |---------|----------|---------|---------|-------------|
 | Notifications | `notifications` | `Always` / `Unfocused` / `Never` | `Always` | Desktop notifications on permission requests. "Unfocused" only notifies when the requesting pane is on a different tab. |
 | Flash | `flash` | `Persist` / `Once` / `Off` | `Once` | Yellow flash on permission requests. "Persist" keeps flashing until resolved, "Once" flashes for 2 seconds. |
-| Beep | `beep_enabled` | `true` / `false` | `true` | Terminal bell on permission requests (Waiting) and on turn completion (Stop). |
+| Beep | `beep` | `On` / `CrossSession` / `Off` | `On` | Terminal bell. `On` beeps on local Waiting/Done events **and** on a new cross-session tag arriving from another Zellij server; `CrossSession` beeps only on cross-session tags (skips local events you can already see); `Off` disables. |
 | Elapsed time | `elapsed_time` | `true` / `false` | `true` | Show time since last activity (appears after 30s). |
 | Mode indicator | `mode_indicator` | `true` / `false` | `true` | Show the Zellij input-mode pill (NORMAL/LOCKED/PANE/…) next to the Zellaude prefix. |
-| Persist tags | `persist_remote_tags` | `true` / `false` | `false` | When on, cross-session remote tags stay visible after the remote leaves the Waiting/Done state until you click the tag to dismiss it. |
-| Max tags | `max_remote_tags` | `1` / `2` / `3` / `4` | `1` | Maximum number of cross-session remote tags rendered side-by-side. Extras collapse into a `+N` overflow chip until a slot opens. |
-| Remote name max length | `remote_name_max_len` | positive integer | `12` | Maximum characters of a remote session name shown in a cross-session tag before truncation. JSON-only — no menu toggle. |
+| Persist tags | `persist_cross_session_tags` | `true` / `false` | `false` | When on, cross-session tags stay visible after the remote leaves the Waiting/Done state until you click the tag to dismiss it. |
+| Max tags | `max_cross_session_tags` | `1` / `2` / `3` / `4` | `1` | Maximum number of cross-session tags rendered side-by-side. Extras collapse into a `+N` overflow chip until a slot opens. |
+| Tag name max length | `cross_session_tag_max_len` | positive integer | `12` | Maximum characters of a remote session name shown in a cross-session tag before truncation. JSON-only — no menu toggle. |
 
 ## Install
 

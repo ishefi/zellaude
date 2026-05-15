@@ -121,6 +121,32 @@ impl FlashMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub enum BeepMode {
+    Off,
+    #[default]
+    On,
+    CrossSession,
+}
+
+impl BeepMode {
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::On => Self::CrossSession,
+            Self::CrossSession => Self::Off,
+            Self::Off => Self::On,
+        }
+    }
+
+    pub fn beeps_local(self) -> bool {
+        matches!(self, Self::On)
+    }
+
+    pub fn beeps_remote(self) -> bool {
+        matches!(self, Self::On | Self::CrossSession)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -128,10 +154,10 @@ pub struct Settings {
     pub flash: FlashMode,
     pub elapsed_time: bool,
     pub mode_indicator: bool,
-    pub beep_enabled: bool,
-    pub remote_name_max_len: usize,
-    pub persist_remote_tags: bool,
-    pub max_remote_tags: usize,
+    pub beep: BeepMode,
+    pub cross_session_tag_max_len: usize,
+    pub persist_cross_session_tags: bool,
+    pub max_cross_session_tags: usize,
 }
 
 impl Default for Settings {
@@ -141,10 +167,10 @@ impl Default for Settings {
             flash: FlashMode::Once,
             elapsed_time: true,
             mode_indicator: true,
-            beep_enabled: true,
-            remote_name_max_len: 12,
-            persist_remote_tags: false,
-            max_remote_tags: 1,
+            beep: BeepMode::On,
+            cross_session_tag_max_len: 12,
+            persist_cross_session_tags: false,
+            max_cross_session_tags: 1,
         }
     }
 }
@@ -162,9 +188,9 @@ pub enum SettingKey {
     Flash,
     ElapsedTime,
     ModeIndicator,
-    BeepEnabled,
-    PersistRemoteTags,
-    MaxRemoteTags,
+    Beep,
+    PersistCrossSessionTags,
+    MaxCrossSessionTags,
 }
 
 pub enum MenuAction {
@@ -190,6 +216,10 @@ pub struct State {
     pub flash_deadlines: HashMap<u32, u64>,
     /// pane_ids that should emit a terminal bell on the next render
     pub beep_pending: HashSet<u32>,
+    /// Set when a new cross-session tag is enqueued by reconcile_remote_tags;
+    /// drained by render to emit a terminal bell. Not gated on active tab —
+    /// cross-session events aren't bound to any local tab.
+    pub beep_remote_pending: bool,
     pub zellij_session_name: Option<String>,
     pub term_program: Option<String>,
     pub input_mode: InputMode,

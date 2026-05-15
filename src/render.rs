@@ -1,5 +1,5 @@
 use crate::state::{
-    unix_now, unix_now_ms, Activity, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
+    unix_now, unix_now_ms, Activity, BeepMode, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
     NotifyMode, RemoteTagClickRegion, RemoteTagKind, SessionInfo, SettingKey, State, ViewMode,
 };
 use std::fmt::Write;
@@ -172,7 +172,7 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     // active should actually emit — otherwise a queued beep would fire later
     // when the user switches to that tab, long after the event. Always drain
     // the set so entries don't accumulate across renders.
-    let beep = state.settings.beep_enabled
+    let local_beep = state.settings.beep.beeps_local()
         && state.beep_pending.iter().any(|pane_id| {
             state
                 .pane_to_tab
@@ -180,7 +180,15 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
                 .is_some_and(|(tab_idx, _)| Some(*tab_idx) == state.active_tab_index)
         });
     state.beep_pending.clear();
-    if beep {
+    // Cross-session beep: fires when reconcile_remote_tags enqueued a new
+    // tag. Not gated on active tab — the remote isn't tied to any local
+    // tab. Every plugin instance in this server will see the flag set and
+    // try to beep, but the flag only sticks on one of them per poll cycle
+    // (each instance reconciles independently), so the user hears at most
+    // one BEL per remote event from each server.
+    let remote_beep = state.settings.beep.beeps_remote() && state.beep_remote_pending;
+    state.beep_remote_pending = false;
+    if local_beep || remote_beep {
         buf.push('\x07');
     }
     // Terminal setup for a 1-row status bar:
@@ -533,8 +541,8 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
     let bar_bg_str = bg(BAR_BG.0, BAR_BG.1, BAR_BG.2);
     let dim_red = fg(200, 100, 100);
     let dim_green = fg(120, 200, 130);
-    let max_len = state.settings.remote_name_max_len.max(1);
-    let cap = state.settings.max_remote_tags.max(1);
+    let max_len = state.settings.cross_session_tag_max_len.max(1);
+    let cap = state.settings.max_cross_session_tags.max(1);
 
     let total = state.remote_tag_order.len();
     // Reserve room for the worst-case overflow chip up front so a narrow
@@ -572,10 +580,7 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
             RemoteTagKind::Done => (&dim_green, "\u{2713}"),
         };
         let region_start = *col;
-        let _ = write!(
-            buf,
-            "{bar_bg_str}{chip_fg} \u{2197} {name} {icon} {RESET}"
-        );
+        let _ = write!(buf, "{bar_bg_str}{chip_fg} \u{2197} {name} {icon} {RESET}");
         *col += needed;
         state.remote_tag_click_regions.push(RemoteTagClickRegion {
             start_col: region_start,
@@ -744,22 +749,25 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         );
     }
 
-    // --- Beep (bool) ---
+    // --- Beep (tristate: On / CrossSession / Off) ---
     {
         let _ = write!(buf, "  ");
         *col += 2;
-        let enabled = state.settings.beep_enabled;
-        let (symbol, sym_color, label_color) = if enabled {
-            ("●", fg(80, 200, 120), fg(255, 255, 255))
-        } else {
-            ("○", fg(100, 100, 100), fg(100, 100, 100))
+        let (symbol, sym_color, label_color, label) = match state.settings.beep {
+            BeepMode::On => ("●", fg(80, 200, 120), fg(255, 255, 255), "Beep: on"),
+            BeepMode::CrossSession => (
+                "◐",
+                fg(80, 200, 120),
+                fg(255, 255, 255),
+                "Beep: cross-session",
+            ),
+            BeepMode::Off => ("○", fg(100, 100, 100), fg(100, 100, 100), "Beep: off"),
         };
-        let label = if enabled { "Beep: on" } else { "Beep: off" };
         render_tristate(
             buf,
             col,
             &mut state.menu_click_regions,
-            SettingKey::BeepEnabled,
+            SettingKey::Beep,
             symbol,
             label,
             &sym_color,
@@ -767,11 +775,11 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         );
     }
 
-    // --- Persist remote tags (bool) ---
+    // --- Persist cross-session tags (bool) ---
     {
         let _ = write!(buf, "  ");
         *col += 2;
-        let enabled = state.settings.persist_remote_tags;
+        let enabled = state.settings.persist_cross_session_tags;
         let (symbol, sym_color, label_color) = if enabled {
             ("●", fg(80, 200, 120), fg(255, 255, 255))
         } else {
@@ -786,7 +794,7 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
             buf,
             col,
             &mut state.menu_click_regions,
-            SettingKey::PersistRemoteTags,
+            SettingKey::PersistCrossSessionTags,
             symbol,
             label,
             &sym_color,
@@ -794,11 +802,11 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         );
     }
 
-    // --- Max remote tags (cycler 1→2→3→4→1) ---
+    // --- Max cross-session tags (cycler 1→2→3→4→1) ---
     {
         let _ = write!(buf, "  ");
         *col += 2;
-        let n = state.settings.max_remote_tags.max(1);
+        let n = state.settings.max_cross_session_tags.max(1);
         let symbol = "◆";
         let sym_color = fg(80, 200, 120);
         let label_color = fg(255, 255, 255);
@@ -807,7 +815,7 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
             buf,
             col,
             &mut state.menu_click_regions,
-            SettingKey::MaxRemoteTags,
+            SettingKey::MaxCrossSessionTags,
             symbol,
             &label,
             &sym_color,

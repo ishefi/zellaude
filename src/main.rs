@@ -158,18 +158,17 @@ impl ZellijPlugin for State {
                                                 self.settings.mode_indicator =
                                                     !self.settings.mode_indicator;
                                             }
-                                            state::SettingKey::BeepEnabled => {
-                                                self.settings.beep_enabled =
-                                                    !self.settings.beep_enabled;
+                                            state::SettingKey::Beep => {
+                                                self.settings.beep = self.settings.beep.cycle();
                                             }
-                                            state::SettingKey::PersistRemoteTags => {
-                                                self.settings.persist_remote_tags =
-                                                    !self.settings.persist_remote_tags;
+                                            state::SettingKey::PersistCrossSessionTags => {
+                                                self.settings.persist_cross_session_tags =
+                                                    !self.settings.persist_cross_session_tags;
                                                 self.reconcile_remote_tags();
                                             }
-                                            state::SettingKey::MaxRemoteTags => {
-                                                self.settings.max_remote_tags =
-                                                    match self.settings.max_remote_tags {
+                                            state::SettingKey::MaxCrossSessionTags => {
+                                                self.settings.max_cross_session_tags =
+                                                    match self.settings.max_cross_session_tags {
                                                         1 => 2,
                                                         2 => 3,
                                                         3 => 4,
@@ -574,7 +573,7 @@ impl State {
 
         // Drop entries whose remote no longer exists, or — when persistence
         // is off — whose remote has left the matching state.
-        let persist = self.settings.persist_remote_tags;
+        let persist = self.settings.persist_cross_session_tags;
         self.remote_tag_order.retain(|(name, kind)| {
             let Some(remote) = self.remote_sessions.get(name) else {
                 return false;
@@ -599,6 +598,7 @@ impl State {
                 }
                 if remote_in_state(remote, kind) {
                     self.remote_tag_order.push_back(key);
+                    self.beep_remote_pending = true;
                 }
             }
         }
