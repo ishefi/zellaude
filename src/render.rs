@@ -1,6 +1,6 @@
 use crate::state::{
     unix_now, unix_now_ms, Activity, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
-    NotifyMode, RemoteTagClickRegion, SessionInfo, SettingKey, State, ViewMode,
+    NotifyMode, RemoteTagClickRegion, RemoteTagKind, SessionInfo, SettingKey, State, ViewMode,
 };
 use std::fmt::Write;
 use std::io::Write as IoWrite;
@@ -532,6 +532,7 @@ fn render_tabs(
 fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, cols: usize) {
     let bar_bg_str = bg(BAR_BG.0, BAR_BG.1, BAR_BG.2);
     let dim_red = fg(200, 100, 100);
+    let dim_green = fg(120, 200, 130);
     let max_len = state.settings.remote_name_max_len.max(1);
     let cap = state.settings.max_remote_tags.max(1);
 
@@ -548,8 +549,10 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
     let tag_budget = cols.saturating_sub(chip_reserve);
 
     let mut shown = 0usize;
-    for session_name in state.remote_tag_order.iter() {
+    let mut overflow_start = state.remote_tag_order.len();
+    for (idx, (session_name, kind)) in state.remote_tag_order.iter().enumerate() {
         if shown >= cap {
+            overflow_start = idx;
             break;
         }
         let Some(remote) = state.remote_sessions.get(session_name) else {
@@ -561,18 +564,24 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
         if *col + needed >= tag_budget {
             // Stop, but fall through so the overflow chip can still render
             // within the reserved budget.
+            overflow_start = idx;
             break;
         }
+        let chip_fg = match kind {
+            RemoteTagKind::Waiting => &dim_red,
+            RemoteTagKind::Done => &dim_green,
+        };
         let region_start = *col;
         let _ = write!(
             buf,
-            "{bar_bg_str}{dim_red} \u{2197} {name} \u{26A0} {RESET}"
+            "{bar_bg_str}{chip_fg} \u{2197} {name} \u{26A0} {RESET}"
         );
         *col += needed;
         state.remote_tag_click_regions.push(RemoteTagClickRegion {
             start_col: region_start,
             end_col: *col,
             session_name: session_name.clone(),
+            kind: *kind,
         });
         shown += 1;
     }
@@ -584,7 +593,20 @@ fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, c
         if *col + needed >= cols {
             return;
         }
-        let _ = write!(buf, "{bar_bg_str}{dim_red}{chip}{RESET}");
+        // Escalate to the most urgent hidden kind: red if any Waiting is
+        // hidden, green otherwise. Avoids falsely implying hidden Waiting
+        // tags when only Done tags overflow.
+        let any_hidden_waiting = state
+            .remote_tag_order
+            .iter()
+            .skip(overflow_start)
+            .any(|(_, kind)| matches!(kind, RemoteTagKind::Waiting));
+        let chip_fg = if any_hidden_waiting {
+            &dim_red
+        } else {
+            &dim_green
+        };
+        let _ = write!(buf, "{bar_bg_str}{chip_fg}{chip}{RESET}");
         *col += needed;
     }
 }

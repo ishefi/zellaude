@@ -72,10 +72,17 @@ pub struct ClickRegion {
     pub is_waiting: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RemoteTagKind {
+    Waiting,
+    Done,
+}
+
 pub struct RemoteTagClickRegion {
     pub start_col: usize,
     pub end_col: usize,
     pub session_name: String,
+    pub kind: RemoteTagKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
@@ -193,11 +200,12 @@ pub struct State {
     pub config_loaded: bool,
     pub hooks_installed: bool,
     pub remote_sessions: BTreeMap<String, RemoteFile>,
-    pub remote_tag_order: VecDeque<String>,
-    /// Names dismissed via click. Suppresses re-adding to the queue until
-    /// the remote leaves Waiting at least once — without this, a click on a
-    /// still-Waiting remote pops back ~1s later via reconcile.
-    pub remote_tag_dismissed: HashSet<String>,
+    pub remote_tag_order: VecDeque<(String, RemoteTagKind)>,
+    /// (Name, kind) pairs dismissed via click. Suppresses re-adding to the
+    /// queue until the remote leaves the matching activity state (Waiting
+    /// or Done/AgentDone) at least once — without this, a click on a
+    /// remote still in the matching state pops back ~1s later via reconcile.
+    pub remote_tag_dismissed: HashSet<(String, RemoteTagKind)>,
     pub remote_tag_click_regions: Vec<RemoteTagClickRegion>,
     pub state_dirty: bool,
     pub last_write_ms: u64,
