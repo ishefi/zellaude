@@ -124,7 +124,9 @@ Claude Code hook → zellaude-hook.sh → zellij pipe → plugin → render
 
 The hook script and registration are version-tagged and updated automatically when the plugin version changes.
 
-Plugin instances within the same Zellij server sync via inter-plugin messaging. Across Zellij servers (different sessions), each instance writes its own state to `~/.config/zellij/plugins/zellaude-state.d/<session>.json` and polls peers' files every second — that's how the right-edge cross-session indicator works. Stale entries (>30s) are dropped; writes are coalesced (≤4/sec). Sessions are cleaned up automatically when tabs are closed.
+Plugin instances within the same Zellij server sync via inter-plugin messaging. Across Zellij servers (different sessions), each instance writes its own state to `~/.config/zellij/plugins/zellaude-state.d/<session>.json` and polls peers' files every second — that's how the right-edge cross-session indicator works. Stale entries (>30s) are ignored; writes are coalesced (≤4/sec). Sessions are cleaned up automatically when tabs are closed.
+
+**Note**: Dead-session files (from `kill -9`, crashes, or non-graceful exits) remain in `zellaude-state.d/` indefinitely. Peers correctly ignore them via the 30 s staleness filter, but the files accumulate. Periodic cleanup: `find ~/.config/zellij/plugins/zellaude-state.d -name '*.json' -mtime +1 -delete`.
 
 ## License
 

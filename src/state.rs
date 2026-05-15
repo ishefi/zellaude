@@ -45,7 +45,7 @@ pub struct SessionInfo {
     pub last_ts_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RemoteFile {
     pub session_name: String,
     pub sessions: BTreeMap<u32, SessionInfo>,

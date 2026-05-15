@@ -457,15 +457,8 @@ fn render_tabs(
 }
 
 fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, cols: usize) {
-    let now_ms = unix_now_ms();
     let bar_bg_str = bg(BAR_BG.0, BAR_BG.1, BAR_BG.2);
     let dim_red = fg(200, 100, 100);
-
-    // Drop stale entries opportunistically (cheap; complements merge-time sweep).
-    state
-        .remote_sessions
-        .retain(|_, f| f.wrote_at_ms + 30_000 >= now_ms);
-
     let max_len = state.settings.remote_name_max_len.max(1);
     for remote in state.remote_sessions.values() {
         if !remote

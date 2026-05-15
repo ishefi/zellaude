@@ -159,6 +159,9 @@ impl ZellijPlugin for State {
             Event::Timer(_) => {
                 let stale_changed = self.cleanup_stale_sessions();
                 let flash_changed = self.cleanup_expired_flashes();
+                if stale_changed {
+                    self.state_dirty = true;
+                }
                 let now_ms = unix_now_ms();
                 if now_ms.saturating_sub(self.last_poll_ms) >= 1000 {
                     self.poll_remote_state();
@@ -424,8 +427,8 @@ impl State {
         let cmd = format!(
             "DIR=\"$HOME/.config/zellij/plugins/zellaude-state.d\" && \
              mkdir -p \"$DIR\" && \
-             printf '%s' '{json_esc}' > \"$DIR/{safe}.json.tmp\" && \
-             mv \"$DIR/{safe}.json.tmp\" \"$DIR/{safe}.json\""
+             printf '%s' '{json_esc}' > \"$DIR/{safe}.json.tmp.$$\" && \
+             mv \"$DIR/{safe}.json.tmp.$$\" \"$DIR/{safe}.json\""
         );
         let mut ctx = BTreeMap::new();
         ctx.insert("type".into(), "write_state".into());
@@ -462,8 +465,7 @@ impl State {
             if f.wrote_at_ms + 30_000 < now_ms {
                 continue;
             }
-            self.remote_sessions
-                .insert(Self::sanitize_session_name(&f.session_name), f);
+            self.remote_sessions.insert(f.session_name.clone(), f);
         }
     }
 }
