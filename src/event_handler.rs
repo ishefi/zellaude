@@ -31,9 +31,7 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
 
     let activity = match event {
         "SessionStart" => Activity::Init,
-        "PreToolUse" => {
-            Activity::Tool(payload.tool_name.clone().unwrap_or_default())
-        }
+        "PreToolUse" => Activity::Tool(payload.tool_name.clone().unwrap_or_default()),
         "PostToolUse" | "PostToolUseFailure" => Activity::Thinking,
         "UserPromptSubmit" => Activity::Thinking,
         "PermissionRequest" => Activity::Waiting,
@@ -53,11 +51,7 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
         _ => Activity::Idle,
     };
 
-    let (tab_index, tab_name) = state
-        .pane_to_tab
-        .get(&payload.pane_id)
-        .cloned()
-        .unzip();
+    let (tab_index, tab_name) = state.pane_to_tab.get(&payload.pane_id).cloned().unzip();
 
     let session = state
         .sessions
