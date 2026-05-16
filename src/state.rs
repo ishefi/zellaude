@@ -148,8 +148,13 @@ impl BeepMode {
 }
 
 /// Verbosity for the disk-backed debug log. `Off` disables logging entirely
-/// (no `run_command` disk writes). Variant declaration order matches severity,
-/// so `Ord` lets call sites do `if settings.log_level >= LogLevel::Debug`.
+/// (no `run_command` disk writes).
+///
+/// Do not reorder variants — `Ord` is load-bearing. Declaration order matches
+/// severity (Off < Error < Warn < Info < Debug < Trace), and call sites gate
+/// with `if settings.log_level >= LogLevel::Debug`. Alphabetizing or otherwise
+/// shuffling the order would silently invert the gating and either suppress
+/// all logs or open the floodgates depending on direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 pub enum LogLevel {
     #[default]

@@ -534,10 +534,17 @@ impl State {
     /// have no direct fs access). `printf '%s\n' >> file` writes shorter
     /// than PIPE_BUF (4096B) are atomic, so concurrent appends from
     /// different plugin instances don't tear.
+    ///
+    /// TODO: no log rotation. Fine while `log_level` defaults to `Off`, but
+    /// if a future change makes a non-Off level the default, this file will
+    /// grow unbounded — add a size cap or daily rollover at that point.
     fn log(&self, level: LogLevel, msg: &str) {
-        if level == LogLevel::Off || self.settings.log_level < level {
+        if self.settings.log_level < level {
             return;
         }
+        // UTC — Zellij plugins have no access to the host timezone, and
+        // SystemTime is epoch-based. Pair with the raw `now_ms` on each
+        // line so a reader chasing a clock-skew ghost can confirm.
         let now_ms = unix_now_ms();
         let secs = now_ms / 1000;
         let ms = now_ms % 1000;
@@ -545,14 +552,8 @@ impl State {
         let mm = (secs / 60) % 60;
         let ss = secs % 60;
         let session = self.zellij_session_name.as_deref().unwrap_or("-");
-        let pane = self
-            .sessions
-            .keys()
-            .next()
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| "-".to_string());
         let line = format!(
-            "[{hh:02}:{mm:02}:{ss:02}.{ms:03} {now_ms}] [{}] [{session}/{pane}] {msg}",
+            "[{hh:02}:{mm:02}:{ss:02}.{ms:03}Z {now_ms}] [{}] [{session}] {msg}",
             level.label()
         );
         let line_esc = line.replace('\'', "'\\''");
@@ -775,6 +776,10 @@ impl State {
                 );
             }
         }
+        // Promote current to prev *before* the retain so we can reuse it as
+        // the membership check below — `current_in_state` already encodes
+        // "remote exists AND in matching state", which is exactly what the
+        // non-persist branch needs.
         self.remote_in_state_prev = current_in_state;
 
         // Drop entries whose remote no longer exists, or — when persistence
@@ -782,24 +787,12 @@ impl State {
         let persist = self.settings.persist_cross_session_tags;
         let log_level = self.settings.log_level;
         let mut dropped: Vec<(String, RemoteTagKind)> = Vec::new();
-        let remote_sessions_snapshot: HashSet<String> =
-            self.remote_sessions.keys().cloned().collect();
-        let in_state_snapshot: HashSet<(String, RemoteTagKind)> = if log_level >= LogLevel::Trace {
-            let mut s = HashSet::new();
-            for kind in [RemoteTagKind::Waiting, RemoteTagKind::Done] {
-                for (name, remote) in &self.remote_sessions {
-                    if remote_in_state(remote, kind) {
-                        s.insert((name.clone(), kind));
-                    }
-                }
-            }
-            s
-        } else {
-            HashSet::new()
-        };
+        let remote_sessions_snapshot: HashSet<&str> =
+            self.remote_sessions.keys().map(|s| s.as_str()).collect();
+        let in_state = &self.remote_in_state_prev;
         self.remote_tag_order.retain(|(name, kind)| {
             let key = (name.clone(), *kind);
-            if !remote_sessions_snapshot.contains(name) {
+            if !remote_sessions_snapshot.contains(name.as_str()) {
                 if log_level >= LogLevel::Trace {
                     dropped.push(key);
                 }
@@ -808,12 +801,7 @@ impl State {
             if persist {
                 return true;
             }
-            let keep = in_state_snapshot.contains(&key) || {
-                // log_level < Trace: re-check (no snapshot available)
-                self.remote_sessions
-                    .get(name)
-                    .is_some_and(|r| remote_in_state(r, *kind))
-            };
+            let keep = in_state.contains(&key);
             if !keep && log_level >= LogLevel::Trace {
                 dropped.push(key);
             }
