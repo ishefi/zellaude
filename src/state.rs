@@ -230,6 +230,13 @@ pub struct State {
     pub config_loaded: bool,
     pub hooks_installed: bool,
     pub remote_sessions: BTreeMap<String, RemoteFile>,
+    /// (session, kind) pairs whose remote was in the matching activity state
+    /// on the previous poll. Used to detect transitions for cross-session
+    /// beep — a pair appearing here for the first time means the remote just
+    /// entered Waiting or Done/AgentDone, which is what we want to beep on.
+    /// Independent of `remote_tag_order` so persist-tag mode doesn't suppress
+    /// beeps on repeat transitions.
+    pub remote_in_state_prev: HashSet<(String, RemoteTagKind)>,
     pub remote_tag_order: VecDeque<(String, RemoteTagKind)>,
     /// (Name, kind) pairs dismissed via click. Suppresses re-adding to the
     /// queue until the remote leaves the matching activity state (Waiting

@@ -8,7 +8,7 @@ use state::{
     unix_now, unix_now_ms, HookPayload, MenuAction, RemoteFile, RemoteTagKind, SessionInfo,
     Settings, State, ViewMode,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use zellij_tile::prelude::*;
 
 const DONE_TIMEOUT: u64 = 30;
@@ -571,6 +571,25 @@ impl State {
                 .is_some_and(|r| remote_in_state(r, *kind))
         });
 
+        // Compute the current set of (remote, kind) pairs in matching state,
+        // and beep on any pair that wasn't in the previous set — i.e. a true
+        // transition into Waiting or Done. Done independently of the tag
+        // queue so persist-tag mode doesn't suppress beeps on repeat events.
+        let mut current_in_state: HashSet<(String, RemoteTagKind)> = HashSet::new();
+        for kind in [RemoteTagKind::Waiting, RemoteTagKind::Done] {
+            for (name, remote) in &self.remote_sessions {
+                if remote_in_state(remote, kind) {
+                    current_in_state.insert((name.clone(), kind));
+                }
+            }
+        }
+        for key in &current_in_state {
+            if !self.remote_in_state_prev.contains(key) {
+                self.beep_remote_pending = true;
+            }
+        }
+        self.remote_in_state_prev = current_in_state;
+
         // Drop entries whose remote no longer exists, or — when persistence
         // is off — whose remote has left the matching state.
         let persist = self.settings.persist_cross_session_tags;
@@ -598,7 +617,6 @@ impl State {
                 }
                 if remote_in_state(remote, kind) {
                     self.remote_tag_order.push_back(key);
-                    self.beep_remote_pending = true;
                 }
             }
         }

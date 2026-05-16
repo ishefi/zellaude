@@ -180,12 +180,14 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
                 .is_some_and(|(tab_idx, _)| Some(*tab_idx) == state.active_tab_index)
         });
     state.beep_pending.clear();
-    // Cross-session beep: fires when reconcile_remote_tags enqueued a new
-    // tag. Not gated on active tab — the remote isn't tied to any local
-    // tab. Every plugin instance in this server will see the flag set and
-    // try to beep, but the flag only sticks on one of them per poll cycle
-    // (each instance reconciles independently), so the user hears at most
-    // one BEL per remote event from each server.
+    // Cross-session beep: fires when reconcile_remote_tags detected a remote
+    // newly entering Waiting or Done since the previous poll. Tracked via
+    // remote_in_state_prev so persist-tag mode doesn't suppress beeps when a
+    // remote re-enters the same state. Not gated on active tab — the remote
+    // isn't tied to any local tab. Every plugin instance in this server will
+    // see the flag set and try to beep, but each instance reconciles
+    // independently against its own prev set, so the user hears at most one
+    // BEL per remote event per instance per poll cycle.
     let remote_beep = state.settings.beep.beeps_remote() && state.beep_remote_pending;
     state.beep_remote_pending = false;
     if local_beep || remote_beep {
