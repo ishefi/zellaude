@@ -7,10 +7,8 @@ pub fn build_pane_to_tab_map(
     tabs: &[TabInfo],
     manifest: &PaneManifest,
 ) -> HashMap<u32, (usize, String)> {
-    let tab_name_by_position: HashMap<usize, String> = tabs
-        .iter()
-        .map(|t| (t.position, t.name.clone()))
-        .collect();
+    let tab_name_by_position: HashMap<usize, String> =
+        tabs.iter().map(|t| (t.position, t.name.clone())).collect();
 
     let mut map = HashMap::new();
     for (&tab_index, panes) in &manifest.panes {

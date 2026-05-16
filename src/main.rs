@@ -4,15 +4,53 @@ mod render;
 mod state;
 mod tab_pane_map;
 
-use state::{unix_now, unix_now_ms, HookPayload, MenuAction, SessionInfo, Settings, State, ViewMode};
-use std::collections::BTreeMap;
+use state::{
+    unix_now, unix_now_ms, HookPayload, LogLevel, MenuAction, RemoteFile, RemoteTagKind,
+    SessionInfo, Settings, State, ViewMode,
+};
+use std::collections::{BTreeMap, HashSet};
 use zellij_tile::prelude::*;
 
 const DONE_TIMEOUT: u64 = 30;
 const TIMER_INTERVAL: f64 = 1.0;
 const FLASH_TICK: f64 = 0.25;
+const LOG_FILE: &str = "$HOME/.config/zellij/plugins/zellaude-debug.log";
 
 register_plugin!(State);
+
+fn dismiss_kind_str(kind: RemoteTagKind) -> &'static str {
+    match kind {
+        RemoteTagKind::Waiting => "waiting",
+        RemoteTagKind::Done => "done",
+    }
+}
+
+fn parse_dismiss_payload(payload: &str) -> Option<(RemoteTagKind, String)> {
+    let payload = payload.trim();
+    let (prefix, name) = payload.split_once(':')?;
+    let kind = match prefix {
+        "waiting" => RemoteTagKind::Waiting,
+        "done" => RemoteTagKind::Done,
+        _ => return None,
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some((kind, name.to_string()))
+}
+
+fn remote_in_state(remote: &RemoteFile, kind: RemoteTagKind) -> bool {
+    remote.sessions.values().any(|s| match kind {
+        RemoteTagKind::Waiting => matches!(s.activity, state::Activity::Waiting),
+        RemoteTagKind::Done => {
+            matches!(
+                s.activity,
+                state::Activity::Done | state::Activity::AgentDone
+            )
+        }
+    })
+}
 
 impl ZellijPlugin for State {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
@@ -82,6 +120,12 @@ impl ZellijPlugin for State {
 
                 match self.view_mode {
                     ViewMode::Normal => {
+                        for region in &self.remote_tag_click_regions {
+                            if col >= region.start_col && col < region.end_col {
+                                self.broadcast_dismiss_tag(&region.session_name, region.kind);
+                                return false;
+                            }
+                        }
                         for region in &self.click_regions {
                             if col >= region.start_col && col < region.end_col {
                                 if region.is_waiting {
@@ -105,8 +149,7 @@ impl ZellijPlugin for State {
                                                     self.settings.notifications.cycle();
                                             }
                                             state::SettingKey::Flash => {
-                                                self.settings.flash =
-                                                    self.settings.flash.cycle();
+                                                self.settings.flash = self.settings.flash.cycle();
                                             }
                                             state::SettingKey::ElapsedTime => {
                                                 self.settings.elapsed_time =
@@ -115,6 +158,34 @@ impl ZellijPlugin for State {
                                             state::SettingKey::ModeIndicator => {
                                                 self.settings.mode_indicator =
                                                     !self.settings.mode_indicator;
+                                            }
+                                            state::SettingKey::Beep => {
+                                                self.settings.beep = self.settings.beep.cycle();
+                                            }
+                                            state::SettingKey::PersistCrossSessionTags => {
+                                                self.settings.persist_cross_session_tags =
+                                                    !self.settings.persist_cross_session_tags;
+                                                self.reconcile_remote_tags();
+                                            }
+                                            state::SettingKey::MaxCrossSessionTags => {
+                                                self.settings.max_cross_session_tags =
+                                                    match self.settings.max_cross_session_tags {
+                                                        1 => 2,
+                                                        2 => 3,
+                                                        3 => 4,
+                                                        _ => 1,
+                                                    };
+                                            }
+                                            state::SettingKey::LogLevel => {
+                                                self.settings.log_level =
+                                                    self.settings.log_level.cycle();
+                                                self.log(
+                                                    LogLevel::Info,
+                                                    &format!(
+                                                        "log_level set to {}",
+                                                        self.settings.log_level.label()
+                                                    ),
+                                                );
                                             }
                                         }
                                         self.save_config();
@@ -134,8 +205,24 @@ impl ZellijPlugin for State {
                 match context.get("type").map(|s| s.as_str()) {
                     Some("load_config") if exit_code == Some(0) => {
                         let raw = String::from_utf8_lossy(&stdout);
-                        if let Ok(settings) = serde_json::from_str::<Settings>(raw.trim()) {
-                            self.settings = settings;
+                        match serde_json::from_str::<Settings>(raw.trim()) {
+                            Ok(settings) => {
+                                self.settings = settings;
+                                self.log(
+                                    LogLevel::Debug,
+                                    &format!(
+                                        "load_config: ok log_level={} beep={:?}",
+                                        self.settings.log_level.label(),
+                                        self.settings.beep
+                                    ),
+                                );
+                            }
+                            Err(e) => {
+                                self.log(
+                                    LogLevel::Warn,
+                                    &format!("load_config: parse error {}", e),
+                                );
+                            }
                         }
                         self.config_loaded = true;
                         true
@@ -144,12 +231,39 @@ impl ZellijPlugin for State {
                         self.hooks_installed = true;
                         false
                     }
+                    Some("poll_remote") if exit_code == Some(0) => {
+                        let raw = String::from_utf8_lossy(&stdout);
+                        self.merge_remote_state(&raw);
+                        true
+                    }
+                    Some("write_state") => false,
+                    Some("write_log") => false,
+                    Some("ring_bell") => false,
                     _ => false,
                 }
             }
             Event::Timer(_) => {
                 let stale_changed = self.cleanup_stale_sessions();
                 let flash_changed = self.cleanup_expired_flashes();
+                if stale_changed {
+                    self.state_dirty = true;
+                }
+                let now_ms = unix_now_ms();
+                if now_ms.saturating_sub(self.last_poll_ms) >= 1000 {
+                    self.poll_remote_state();
+                }
+                if self.state_dirty && now_ms.saturating_sub(self.last_write_ms) >= 250 {
+                    self.write_own_state();
+                } else if !self.sessions.is_empty()
+                    && now_ms.saturating_sub(self.last_write_ms) >= 10_000
+                {
+                    // Heartbeat: refresh our state file so peers don't drop us
+                    // as stale (30s threshold). Must fire whenever we track
+                    // any session — a peer with persist_cross_session_tags=on
+                    // may be holding a Waiting/Done tag for us even after we
+                    // transitioned back to Idle.
+                    self.write_own_state();
+                }
                 let has_flashes = self.has_active_flashes();
                 if has_flashes {
                     set_timeout(FLASH_TICK);
@@ -189,8 +303,21 @@ impl ZellijPlugin for State {
                 };
                 let payload: HookPayload = match serde_json::from_str(payload_str) {
                     Ok(p) => p,
-                    Err(_) => return false,
+                    Err(e) => {
+                        self.log(
+                            LogLevel::Warn,
+                            &format!("pipe(zellaude): parse error {}", e),
+                        );
+                        return false;
+                    }
                 };
+                self.log(
+                    LogLevel::Debug,
+                    &format!(
+                        "pipe(zellaude): hook_event={} pane_id={} session_id={:?} tool={:?}",
+                        payload.hook_event, payload.pane_id, payload.session_id, payload.tool_name
+                    ),
+                );
                 event_handler::handle_hook_event(self, payload);
                 true
             }
@@ -212,6 +339,13 @@ impl ZellijPlugin for State {
                 // Another instance broadcast new settings
                 if let Some(ref payload) = pipe_message.payload {
                     if let Ok(settings) = serde_json::from_str::<Settings>(payload) {
+                        self.log(
+                            LogLevel::Trace,
+                            &format!(
+                                "pipe(settings): apply log_level={}",
+                                settings.log_level.label()
+                            ),
+                        );
                         self.settings = settings;
                         return true;
                     }
@@ -224,7 +358,24 @@ impl ZellijPlugin for State {
                     if let Ok(sessions) =
                         serde_json::from_str::<BTreeMap<u32, SessionInfo>>(payload)
                     {
+                        self.log(
+                            LogLevel::Trace,
+                            &format!("pipe(sync): incoming {} sessions", sessions.len()),
+                        );
                         self.merge_sessions(sessions);
+                        return true;
+                    }
+                }
+                false
+            }
+            "zellaude:dismiss-tag" => {
+                // Another instance (or this one's click handler) is dismissing
+                // a remote tag. Apply locally so every tab in the server agrees.
+                if let Some(ref payload) = pipe_message.payload {
+                    if let Some((kind, name)) = parse_dismiss_payload(payload) {
+                        let key = (name, kind);
+                        self.remote_tag_order.retain(|entry| entry != &key);
+                        self.remote_tag_presented.insert(key);
                         return true;
                     }
                 }
@@ -293,7 +444,9 @@ impl State {
 
     fn has_active_flashes(&self) -> bool {
         let now = unix_now_ms();
-        self.flash_deadlines.values().any(|&deadline| now < deadline)
+        self.flash_deadlines
+            .values()
+            .any(|&deadline| now < deadline)
     }
 
     fn cleanup_expired_flashes(&mut self) -> bool {
@@ -320,15 +473,19 @@ impl State {
 
     fn broadcast_sessions(&self) {
         let mut msg = MessageToPlugin::new("zellaude:sync");
-        msg.message_payload =
-            Some(serde_json::to_string(&self.sessions).unwrap_or_default());
+        msg.message_payload = Some(serde_json::to_string(&self.sessions).unwrap_or_default());
         pipe_message_to_plugin(msg);
     }
 
     fn broadcast_settings(&self) {
         let mut msg = MessageToPlugin::new("zellaude:settings");
-        msg.message_payload =
-            Some(serde_json::to_string(&self.settings).unwrap_or_default());
+        msg.message_payload = Some(serde_json::to_string(&self.settings).unwrap_or_default());
+        pipe_message_to_plugin(msg);
+    }
+
+    fn broadcast_dismiss_tag(&self, session_name: &str, kind: RemoteTagKind) {
+        let mut msg = MessageToPlugin::new("zellaude:dismiss-tag");
+        msg.message_payload = Some(format!("{}:{}", dismiss_kind_str(kind), session_name));
         pipe_message_to_plugin(msg);
     }
 
@@ -360,6 +517,71 @@ impl State {
         run_command(&["sh", "-c", &cmd], ctx);
     }
 
+    /// Emit a terminal bell to the host pty. Writing `\x07` into the
+    /// status-bar render buffer doesn't work: Zellij parses that stream
+    /// through its own grid state machine and consumes BEL bytes instead
+    /// of forwarding them to the outer pty. We also can't trust the Zellij
+    /// server's `$SSH_TTY` env — the server is daemonized at first launch
+    /// and inherits whichever pty started it; that pty may be long gone
+    /// while the user is now attached from a different SSH session.
+    ///
+    /// Instead, scan `/proc` for live Zellij client processes (`zellij`
+    /// with no `--server` arg) and write `\a` to each one's stdout. Each
+    /// client's stdout is the pty of an attached terminal, so this reaches
+    /// the same place that hears bells from regular panes — and rings on
+    /// every attached client, matching native bell behavior. Linux-only;
+    /// the rest of the codebase already assumes Linux/`/proc`-style FS
+    /// indirectly via `run_command`. Fire-and-forget.
+    fn ring_terminal_bell(&self) {
+        let cmd = "for pid in /proc/[0-9]*; do \
+                     [ \"$(cat \"$pid/comm\" 2>/dev/null)\" = \"zellij\" ] || continue; \
+                     grep -q -- --server \"$pid/cmdline\" 2>/dev/null && continue; \
+                     tty=$(readlink \"$pid/fd/1\" 2>/dev/null); \
+                     case \"$tty\" in /dev/pts/*) \
+                       [ -w \"$tty\" ] && printf '\\a' > \"$tty\" 2>/dev/null;; \
+                     esac; \
+                   done";
+        let mut ctx = BTreeMap::new();
+        ctx.insert("type".into(), "ring_bell".into());
+        run_command(&["sh", "-c", cmd], ctx);
+    }
+
+    /// Append one line to the disk-backed debug log, gated on the
+    /// `log_level` setting. Fire-and-forget via run_command (WASM plugins
+    /// have no direct fs access). `printf '%s\n' >> file` writes shorter
+    /// than PIPE_BUF (4096B) are atomic, so concurrent appends from
+    /// different plugin instances don't tear.
+    ///
+    /// TODO: no log rotation. Fine while `log_level` defaults to `Off`, but
+    /// if a future change makes a non-Off level the default, this file will
+    /// grow unbounded — add a size cap or daily rollover at that point.
+    fn log(&self, level: LogLevel, msg: &str) {
+        if self.settings.log_level < level {
+            return;
+        }
+        // UTC — Zellij plugins have no access to the host timezone, and
+        // SystemTime is epoch-based. Pair with the raw `now_ms` on each
+        // line so a reader chasing a clock-skew ghost can confirm.
+        let now_ms = unix_now_ms();
+        let secs = now_ms / 1000;
+        let ms = now_ms % 1000;
+        let hh = (secs / 3600) % 24;
+        let mm = (secs / 60) % 60;
+        let ss = secs % 60;
+        let session = self.zellij_session_name.as_deref().unwrap_or("-");
+        let line = format!(
+            "[{hh:02}:{mm:02}:{ss:02}.{ms:03}Z {now_ms}] [{}] [{session}] {msg}",
+            level.label()
+        );
+        let line_esc = line.replace('\'', "'\\''");
+        let cmd = format!(
+            "mkdir -p \"$HOME/.config/zellij/plugins\" && printf '%s\\n' '{line_esc}' >> \"{LOG_FILE}\" 2>/dev/null"
+        );
+        let mut ctx = BTreeMap::new();
+        ctx.insert("type".into(), "write_log".into());
+        run_command(&["sh", "-c", &cmd], ctx);
+    }
+
     fn merge_sessions(&mut self, incoming: BTreeMap<u32, SessionInfo>) {
         for (pane_id, mut session) in incoming {
             let dominated = self
@@ -374,7 +596,275 @@ impl State {
                     session.tab_name = Some(name.clone());
                 }
                 self.sessions.insert(pane_id, session);
+                self.state_dirty = true;
             }
+        }
+    }
+
+    fn sanitize_session_name(name: &str) -> String {
+        name.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    }
+
+    fn write_own_state(&mut self) {
+        let Some(name) = self.zellij_session_name.clone() else {
+            self.log(
+                LogLevel::Trace,
+                "write_own_state: skip (no zellij_session_name)",
+            );
+            return;
+        };
+        let safe = Self::sanitize_session_name(&name);
+        let payload = RemoteFile {
+            session_name: name.clone(),
+            sessions: self.sessions.clone(),
+            wrote_at_ms: unix_now_ms(),
+        };
+        if self.settings.log_level >= LogLevel::Trace {
+            let acts: Vec<String> = self
+                .sessions
+                .values()
+                .map(|s| format!("{:?}", s.activity))
+                .collect();
+            self.log(
+                LogLevel::Trace,
+                &format!(
+                    "write_own_state: session={} sessions={} activities=[{}]",
+                    name,
+                    self.sessions.len(),
+                    acts.join(",")
+                ),
+            );
+        }
+        let Ok(json) = serde_json::to_string(&payload) else {
+            return;
+        };
+        let json_esc = json.replace('\'', "'\\''");
+        let cmd = format!(
+            "DIR=\"$HOME/.config/zellij/plugins/zellaude-state.d\" && \
+             mkdir -p \"$DIR\" && \
+             printf '%s' '{json_esc}' > \"$DIR/{safe}.json.tmp.$$\" && \
+             mv \"$DIR/{safe}.json.tmp.$$\" \"$DIR/{safe}.json\""
+        );
+        let mut ctx = BTreeMap::new();
+        ctx.insert("type".into(), "write_state".into());
+        run_command(&["sh", "-c", &cmd], ctx);
+        self.last_write_ms = unix_now_ms();
+        self.state_dirty = false;
+    }
+
+    fn poll_remote_state(&mut self) {
+        self.log(LogLevel::Trace, "poll_remote_state: start");
+        // Portable across GNU and BSD shells: avoid `xargs -r`.
+        // The `if [ -n "$(ls ...)" ]` guard returns `[]` when the dir is empty
+        // or missing, instead of letting jq see a literal `*.json`.
+        let cmd = "DIR=\"$HOME/.config/zellij/plugins/zellaude-state.d\"; \
+                   { if [ -n \"$(ls \"$DIR\"/*.json 2>/dev/null)\" ]; then \
+                       jq -s '.' \"$DIR\"/*.json; \
+                     else echo '[]'; fi; } 2>/dev/null";
+        let mut ctx = BTreeMap::new();
+        ctx.insert("type".into(), "poll_remote".into());
+        run_command(&["sh", "-c", cmd], ctx);
+        self.last_poll_ms = unix_now_ms();
+    }
+
+    fn merge_remote_state(&mut self, raw: &str) {
+        let raw_trim = raw.trim();
+        let files = match serde_json::from_str::<Vec<RemoteFile>>(raw_trim) {
+            Ok(f) => f,
+            Err(e) => {
+                self.log(
+                    LogLevel::Warn,
+                    &format!(
+                        "merge_remote_state: parse error len={} err={}",
+                        raw_trim.len(),
+                        e
+                    ),
+                );
+                return;
+            }
+        };
+        self.log(
+            LogLevel::Debug,
+            &format!(
+                "merge_remote_state: parsed {} files (raw {} bytes)",
+                files.len(),
+                raw_trim.len()
+            ),
+        );
+        let now_ms = unix_now_ms();
+        let own = self.zellij_session_name.as_deref();
+        self.remote_sessions.clear();
+        for f in files {
+            if Some(f.session_name.as_str()) == own {
+                self.log(
+                    LogLevel::Trace,
+                    &format!("merge_remote_state: skip own session {}", f.session_name),
+                );
+                continue;
+            }
+            let age_ms = now_ms.saturating_sub(f.wrote_at_ms);
+            if f.wrote_at_ms + 30_000 < now_ms {
+                self.log(
+                    LogLevel::Trace,
+                    &format!(
+                        "merge_remote_state: drop stale {} age_ms={}",
+                        f.session_name, age_ms
+                    ),
+                );
+                continue;
+            }
+            let acts: Vec<String> = f
+                .sessions
+                .values()
+                .map(|s| format!("{:?}", s.activity))
+                .collect();
+            self.log(
+                LogLevel::Trace,
+                &format!(
+                    "merge_remote_state: keep {} age_ms={} sessions={} activities=[{}]",
+                    f.session_name,
+                    age_ms,
+                    f.sessions.len(),
+                    acts.join(",")
+                ),
+            );
+            self.remote_sessions.insert(f.session_name.clone(), f);
+        }
+        self.log(
+            LogLevel::Debug,
+            &format!(
+                "merge_remote_state: after-filter remote_sessions={}",
+                self.remote_sessions.len()
+            ),
+        );
+        self.reconcile_remote_tags();
+    }
+
+    fn reconcile_remote_tags(&mut self) {
+        // Lifecycle: a tag is presented at most once per remote-session
+        // lifetime, where "lifetime" ends when the remote's state file is
+        // evicted from `remote_sessions` (no heartbeat for 30s — see
+        // `merge_remote_state`). This keeps `/loop`'s repeated Stop hooks
+        // and our own Done→Idle staleness flip from re-triggering the tag
+        // and bell every cycle. Waiting is more urgent than Done: if both
+        // would qualify for the same remote, Waiting wins and supersedes
+        // any existing Done (clicking through to the prompt is the action
+        // the user wants).
+
+        // Drop "presented" markers for remotes that have disappeared. Lets
+        // the tag re-arm if the remote starts publishing state again later.
+        let live_remotes: HashSet<&str> =
+            self.remote_sessions.keys().map(|s| s.as_str()).collect();
+        self.remote_tag_presented
+            .retain(|(name, _)| live_remotes.contains(name.as_str()));
+
+        // Decide each remote's desired tag kind: Waiting > Done > none.
+        let mut desired: BTreeMap<String, RemoteTagKind> = BTreeMap::new();
+        for (name, remote) in &self.remote_sessions {
+            if remote_in_state(remote, RemoteTagKind::Waiting) {
+                desired.insert(name.clone(), RemoteTagKind::Waiting);
+            } else if remote_in_state(remote, RemoteTagKind::Done) {
+                desired.insert(name.clone(), RemoteTagKind::Done);
+            }
+        }
+
+        // Bootstrap: on the very first poll after this plugin instance
+        // starts, suppress notification for whatever's already on disk.
+        // Otherwise attaching to a different Zellij session (Ctrl+o,w) and
+        // landing on a fresh plugin would replay a bell + tag for the
+        // session you just left, even though that's the state you already
+        // saw locally. By marking everything currently desired as already
+        // "presented" before the enqueue loop runs, we silence first-poll
+        // notifications without losing the ability to react when a remote
+        // *transitions* into a new state later.
+        if !self.remote_bootstrap_done {
+            for (name, kind) in &desired {
+                self.remote_tag_presented.insert((name.clone(), *kind));
+            }
+            self.remote_bootstrap_done = true;
+            self.log(
+                LogLevel::Debug,
+                &format!(
+                    "reconcile: bootstrap suppressed {} pre-existing remote tag(s)",
+                    desired.len()
+                ),
+            );
+        }
+        if self.settings.log_level >= LogLevel::Debug {
+            let mut pairs: Vec<String> =
+                desired.iter().map(|(n, k)| format!("{n}:{k:?}")).collect();
+            pairs.sort();
+            self.log(
+                LogLevel::Debug,
+                &format!(
+                    "reconcile: desired=[{}] persist={}",
+                    pairs.join(","),
+                    self.settings.persist_cross_session_tags
+                ),
+            );
+        }
+
+        // If Waiting supersedes a queued Done for the same remote, evict the
+        // Done entry and mark it presented so it can't pop back later. Mirror
+        // the eviction to peer instances so all tabs agree.
+        let persist = self.settings.persist_cross_session_tags;
+        let log_level = self.settings.log_level;
+        let mut superseded: Vec<(String, RemoteTagKind)> = Vec::new();
+        self.remote_tag_order.retain(|(name, kind)| {
+            // Drop entries for remotes that no longer exist.
+            if !live_remotes.contains(name.as_str()) {
+                if log_level >= LogLevel::Trace {
+                    superseded.push((name.clone(), *kind));
+                }
+                return false;
+            }
+            // If a more urgent kind is desired for this remote, evict.
+            if matches!(kind, RemoteTagKind::Done)
+                && desired.get(name) == Some(&RemoteTagKind::Waiting)
+            {
+                superseded.push((name.clone(), *kind));
+                return false;
+            }
+            // In non-persist mode, drop tags whose remote has left the
+            // matching state. The presented marker stays, so it won't return.
+            if !persist && desired.get(name) != Some(kind) {
+                if log_level >= LogLevel::Trace {
+                    superseded.push((name.clone(), *kind));
+                }
+                return false;
+            }
+            true
+        });
+        for (n, k) in &superseded {
+            self.log(LogLevel::Trace, &format!("reconcile: drop tag {n}:{k:?}"));
+            self.remote_tag_presented.insert((n.clone(), *k));
+        }
+
+        // Enqueue tags for remotes whose desired kind hasn't been presented
+        // yet this lifetime. Beep once per actual enqueue.
+        for (name, kind) in desired {
+            let key = (name, kind);
+            if self.remote_tag_presented.contains(&key) {
+                continue;
+            }
+            if self.remote_tag_order.iter().any(|entry| entry == &key) {
+                continue;
+            }
+            self.log(
+                LogLevel::Info,
+                &format!("reconcile: enqueue {}:{:?}", key.0, key.1),
+            );
+            self.remote_tag_order.push_back(key.clone());
+            self.remote_tag_presented.insert(key);
+            self.beep_remote_pending = true;
         }
     }
 }

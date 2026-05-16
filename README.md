@@ -12,9 +12,11 @@ A Zellij status bar plugin that replaces the default tab bar with Claude Code ac
 - **Clickable tabs** — click any tab to switch to it
 - **Smart pane focus** — clicking a waiting (⚠) session focuses the exact pane so you can respond to the permission prompt immediately
 - **Permission flash** — sessions pulse bright yellow for 2 seconds when a permission request arrives
+- **Audible bell** — terminal bell (`\x07`) on permission requests and when a session finishes a turn, so you don't miss notifications while focused elsewhere
 - **Desktop notifications** — macOS notification on permission requests (rate-limited to once per 10s per tab), with click-to-focus support via [terminal-notifier](https://github.com/julienXX/terminal-notifier)
 - **Elapsed time** — shows how long a session has been in its current state (after 30s), making it easy to spot stuck sessions
 - **Multi-instance sync** — all Zellij tabs show a unified view of all sessions
+- **Cross-session presence** — when attached to one Zellij session, the right edge of the bar shows a `↗ <session> ⚠` indicator for *other* Zellij sessions whose Claude pane is awaiting permission (red) or has just finished a turn (green), so SSH/headless users get an in-bar signal even where pop-ups can't reach. Multiple remotes stack side-by-side up to a configurable cap (default 1, was unbounded prior to this version); extras roll up into a `+N` overflow chip. Optionally **persist** tags so they remain visible after the remote resolves until you click them to dismiss. Persisted tags do *not* survive a Zellij restart — they live in plugin memory only.
 
 ### Activity symbols
 
@@ -37,11 +39,17 @@ A Zellij status bar plugin that replaces the default tab bar with Claude Code ac
 
 Click the **Zellaude** prefix on the left side of the bar to open the settings menu. Click it again (or the `×` button) to close. Settings are persisted to `~/.config/zellij/plugins/zellaude.json`.
 
-| Setting | Options | Default | Description |
-|---------|---------|---------|-------------|
-| Notifications | Always / Unfocused / Off | Always | Desktop notifications on permission requests. "Unfocused" only notifies when the requesting pane is on a different tab. |
-| Flash | Persist / Brief / Off | Brief | Yellow flash on permission requests. "Persist" keeps flashing until resolved, "Brief" flashes for 2 seconds. |
-| Elapsed time | On / Off | On | Show time since last activity (appears after 30s). |
+| Setting | JSON key | Options | Default | Description |
+|---------|----------|---------|---------|-------------|
+| Notifications | `notifications` | `Always` / `Unfocused` / `Never` | `Always` | Desktop notifications on permission requests. "Unfocused" only notifies when the requesting pane is on a different tab. |
+| Flash | `flash` | `Persist` / `Once` / `Off` | `Once` | Yellow flash on permission requests. "Persist" keeps flashing until resolved, "Once" flashes for 2 seconds. |
+| Beep | `beep` | `On` / `CrossSession` / `Off` | `On` | Terminal bell. `On` beeps on local Waiting/Done events **and** on a new cross-session tag arriving from another Zellij server; `CrossSession` beeps only on cross-session tags (skips local events you can already see); `Off` disables. |
+| Elapsed time | `elapsed_time` | `true` / `false` | `true` | Show time since last activity (appears after 30s). |
+| Mode indicator | `mode_indicator` | `true` / `false` | `true` | Show the Zellij input-mode pill (NORMAL/LOCKED/PANE/…) next to the Zellaude prefix. |
+| Persist tags | `persist_cross_session_tags` | `true` / `false` | `false` | When on, cross-session tags stay visible after the remote leaves the Waiting/Done state until you click the tag to dismiss it. |
+| Max tags | `max_cross_session_tags` | `1` / `2` / `3` / `4` | `1` | Maximum number of cross-session tags rendered side-by-side. Extras collapse into a `+N` overflow chip until a slot opens. |
+| Tag name max length | `cross_session_tag_max_len` | positive integer | `12` | Maximum characters of a remote session name shown in a cross-session tag before truncation. JSON-only — no menu toggle. |
+| Log level | `log_level` | `Off` / `Error` / `Warn` / `Info` / `Debug` / `Trace` | `Off` | Diagnostic logging to `~/.config/zellij/plugins/zellaude-debug.log`. `Off` disables all disk writes; higher levels emit progressively more detail about hook events, the cross-session poll/merge/reconcile pipeline, and BEL emission. Use `Debug` to investigate missing cross-session beeps. |
 
 ## Install
 
@@ -123,7 +131,9 @@ Claude Code hook → zellaude-hook.sh → zellij pipe → plugin → render
 
 The hook script and registration are version-tagged and updated automatically when the plugin version changes.
 
-All state lives in WASM memory. No temp files, no race conditions. Multiple plugin instances (one per tab) sync state automatically via inter-plugin messaging. Sessions are cleaned up automatically when tabs are closed.
+Plugin instances within the same Zellij server sync via inter-plugin messaging. Across Zellij servers (different sessions), each instance writes its own state to `~/.config/zellij/plugins/zellaude-state.d/<session>.json` and polls peers' files every second — that's how the right-edge cross-session indicator works. Stale entries (>30s) are ignored; writes are coalesced (≤4/sec). Sessions are cleaned up automatically when tabs are closed.
+
+**Note**: Dead-session files (from `kill -9`, crashes, or non-graceful exits) remain in `zellaude-state.d/` indefinitely. Peers correctly ignore them via the 30 s staleness filter, but the files accumulate. Periodic cleanup: `find ~/.config/zellij/plugins/zellaude-state.d -name '*.json' -mtime +1 -delete`.
 
 ## License
 
