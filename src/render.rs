@@ -168,11 +168,11 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     state.remote_tag_click_regions.clear();
 
     let mut buf = String::with_capacity(cols * 4);
-    // BEL (\x07) for pending notification beeps. Every plugin instance queues
-    // its own beep when a hook arrives, but only the instance whose tab is
-    // active should actually emit — otherwise a queued beep would fire later
-    // when the user switches to that tab, long after the event. Always drain
-    // the set so entries don't accumulate across renders.
+    // Pending notification beeps. Every plugin instance queues its own beep
+    // when a hook arrives, but only the instance whose tab is active should
+    // actually emit — otherwise a queued beep would fire later when the user
+    // switches to that tab, long after the event. Always drain the set so
+    // entries don't accumulate across renders.
     let local_beep_candidate = !state.beep_pending.is_empty();
     let local_beep = state.settings.beep.beeps_local()
         && state.beep_pending.iter().any(|pane_id| {
@@ -195,7 +195,10 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     let remote_beep = state.settings.beep.beeps_remote() && state.beep_remote_pending;
     state.beep_remote_pending = false;
     if local_beep || remote_beep {
-        buf.push('\x07');
+        // Don't push '\x07' into the status-bar buffer — Zellij's grid parser
+        // would consume it. Shell out instead so the bell reaches the host
+        // pty (and through SSH to the user's terminal emulator).
+        state.ring_terminal_bell();
         state.log(
             LogLevel::Info,
             &format!(

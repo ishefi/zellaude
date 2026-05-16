@@ -244,6 +244,7 @@ impl ZellijPlugin for State {
                     }
                     Some("write_state") => false,
                     Some("write_log") => false,
+                    Some("ring_bell") => false,
                     _ => false,
                 }
             }
@@ -520,6 +521,23 @@ impl State {
         let mut ctx = BTreeMap::new();
         ctx.insert("type".into(), "save_config".into());
         run_command(&["sh", "-c", &cmd], ctx);
+    }
+
+    /// Emit a terminal bell to the host pty. Writing `\x07` into the
+    /// status-bar render buffer doesn't work: Zellij parses that stream
+    /// through its own grid state machine and consumes BEL bytes instead
+    /// of forwarding them to the outer pty. So we shell out and write `\a`
+    /// to a tty that *is* connected to the user's terminal — `$SSH_TTY`
+    /// when present, else `/dev/tty`. The Zellij server inherits SSH_TTY
+    /// from the login shell that started it, so this reaches the same
+    /// terminal that hears bells from regular panes. Fire-and-forget.
+    fn ring_terminal_bell(&self) {
+        let cmd = "{ [ -n \"$SSH_TTY\" ] && [ -w \"$SSH_TTY\" ] && \
+                   printf '\\a' > \"$SSH_TTY\"; } || \
+                   printf '\\a' > /dev/tty 2>/dev/null || true";
+        let mut ctx = BTreeMap::new();
+        ctx.insert("type".into(), "ring_bell".into());
+        run_command(&["sh", "-c", cmd], ctx);
     }
 
     /// Append one line to the disk-backed debug log, gated on the
