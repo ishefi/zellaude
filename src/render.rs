@@ -1,6 +1,7 @@
 use crate::state::{
-    unix_now, unix_now_ms, Activity, BeepMode, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
-    NotifyMode, RemoteTagClickRegion, RemoteTagKind, SessionInfo, SettingKey, State, ViewMode,
+    unix_now, unix_now_ms, Activity, BeepMode, ClickRegion, FlashMode, LogLevel, MenuAction,
+    MenuClickRegion, NotifyMode, RemoteTagClickRegion, RemoteTagKind, SessionInfo, SettingKey,
+    State, ViewMode,
 };
 use std::fmt::Write;
 use std::io::Write as IoWrite;
@@ -172,6 +173,7 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     // active should actually emit — otherwise a queued beep would fire later
     // when the user switches to that tab, long after the event. Always drain
     // the set so entries don't accumulate across renders.
+    let local_beep_candidate = !state.beep_pending.is_empty();
     let local_beep = state.settings.beep.beeps_local()
         && state.beep_pending.iter().any(|pane_id| {
             state
@@ -179,6 +181,7 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
                 .get(pane_id)
                 .is_some_and(|(tab_idx, _)| Some(*tab_idx) == state.active_tab_index)
         });
+    let local_pending_count = state.beep_pending.len();
     state.beep_pending.clear();
     // Cross-session beep: fires when reconcile_remote_tags detected a remote
     // newly entering Waiting or Done since the previous poll. Tracked via
@@ -188,10 +191,34 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     // see the flag set and try to beep, but each instance reconciles
     // independently against its own prev set, so the user hears at most one
     // BEL per remote event per instance per poll cycle.
+    let remote_pending_raw = state.beep_remote_pending;
     let remote_beep = state.settings.beep.beeps_remote() && state.beep_remote_pending;
     state.beep_remote_pending = false;
     if local_beep || remote_beep {
         buf.push('\x07');
+        state.log(
+            LogLevel::Info,
+            &format!(
+                "render: BEL emitted (local={} remote={} beep_setting={:?})",
+                local_beep, remote_beep, state.settings.beep
+            ),
+        );
+    } else if remote_pending_raw {
+        state.log(
+            LogLevel::Debug,
+            &format!(
+                "render: cross-session beep pending but suppressed by beep_setting={:?}",
+                state.settings.beep
+            ),
+        );
+    } else if local_beep_candidate {
+        state.log(
+            LogLevel::Trace,
+            &format!(
+                "render: {} local beep_pending entries but none on active tab (idx={:?})",
+                local_pending_count, state.active_tab_index
+            ),
+        );
     }
     // Terminal setup for a 1-row status bar:
     //  \x1b[H     — cursor home (prevent scroll from cursor at end-of-line)
@@ -818,6 +845,35 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
             col,
             &mut state.menu_click_regions,
             SettingKey::MaxCrossSessionTags,
+            symbol,
+            &label,
+            &sym_color,
+            &label_color,
+        );
+    }
+
+    // --- Log level (cycler off→error→warn→info→debug→trace→off) ---
+    {
+        let _ = write!(buf, "  ");
+        *col += 2;
+        let level = state.settings.log_level;
+        let symbol = if level == LogLevel::Off { "○" } else { "◆" };
+        let sym_color = if level == LogLevel::Off {
+            fg(100, 100, 100)
+        } else {
+            fg(255, 180, 60)
+        };
+        let label_color = if level == LogLevel::Off {
+            fg(100, 100, 100)
+        } else {
+            fg(255, 255, 255)
+        };
+        let label = format!("Log: {}", level.label());
+        render_tristate(
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::LogLevel,
             symbol,
             &label,
             &sym_color,

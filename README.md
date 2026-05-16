@@ -49,6 +49,7 @@ Click the **Zellaude** prefix on the left side of the bar to open the settings m
 | Persist tags | `persist_cross_session_tags` | `true` / `false` | `false` | When on, cross-session tags stay visible after the remote leaves the Waiting/Done state until you click the tag to dismiss it. |
 | Max tags | `max_cross_session_tags` | `1` / `2` / `3` / `4` | `1` | Maximum number of cross-session tags rendered side-by-side. Extras collapse into a `+N` overflow chip until a slot opens. |
 | Tag name max length | `cross_session_tag_max_len` | positive integer | `12` | Maximum characters of a remote session name shown in a cross-session tag before truncation. JSON-only — no menu toggle. |
+| Log level | `log_level` | `Off` / `Error` / `Warn` / `Info` / `Debug` / `Trace` | `Off` | Diagnostic logging to `~/.config/zellij/plugins/zellaude-debug.log`. `Off` disables all disk writes; higher levels emit progressively more detail about hook events, the cross-session poll/merge/reconcile pipeline, and BEL emission. Use `Debug` to investigate missing cross-session beeps. |
 
 ## Install
 

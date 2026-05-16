@@ -147,6 +147,49 @@ impl BeepMode {
     }
 }
 
+/// Verbosity for the disk-backed debug log. `Off` disables logging entirely
+/// (no `run_command` disk writes).
+///
+/// Do not reorder variants — `Ord` is load-bearing. Declaration order matches
+/// severity (Off < Error < Warn < Info < Debug < Trace), and call sites gate
+/// with `if settings.log_level >= LogLevel::Debug`. Alphabetizing or otherwise
+/// shuffling the order would silently invert the gating and either suppress
+/// all logs or open the floodgates depending on direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
+pub enum LogLevel {
+    #[default]
+    Off,
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl LogLevel {
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Off => Self::Error,
+            Self::Error => Self::Warn,
+            Self::Warn => Self::Info,
+            Self::Info => Self::Debug,
+            Self::Debug => Self::Trace,
+            Self::Trace => Self::Off,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Error => "error",
+            Self::Warn => "warn",
+            Self::Info => "info",
+            Self::Debug => "debug",
+            Self::Trace => "trace",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -158,6 +201,7 @@ pub struct Settings {
     pub cross_session_tag_max_len: usize,
     pub persist_cross_session_tags: bool,
     pub max_cross_session_tags: usize,
+    pub log_level: LogLevel,
 }
 
 impl Default for Settings {
@@ -171,6 +215,7 @@ impl Default for Settings {
             cross_session_tag_max_len: 12,
             persist_cross_session_tags: false,
             max_cross_session_tags: 1,
+            log_level: LogLevel::Off,
         }
     }
 }
@@ -191,6 +236,7 @@ pub enum SettingKey {
     Beep,
     PersistCrossSessionTags,
     MaxCrossSessionTags,
+    LogLevel,
 }
 
 pub enum MenuAction {

@@ -5,8 +5,8 @@ mod state;
 mod tab_pane_map;
 
 use state::{
-    unix_now, unix_now_ms, HookPayload, MenuAction, RemoteFile, RemoteTagKind, SessionInfo,
-    Settings, State, ViewMode,
+    unix_now, unix_now_ms, HookPayload, LogLevel, MenuAction, RemoteFile, RemoteTagKind,
+    SessionInfo, Settings, State, ViewMode,
 };
 use std::collections::{BTreeMap, HashSet};
 use zellij_tile::prelude::*;
@@ -14,6 +14,7 @@ use zellij_tile::prelude::*;
 const DONE_TIMEOUT: u64 = 30;
 const TIMER_INTERVAL: f64 = 1.0;
 const FLASH_TICK: f64 = 0.25;
+const LOG_FILE: &str = "$HOME/.config/zellij/plugins/zellaude-debug.log";
 
 register_plugin!(State);
 
@@ -37,6 +38,12 @@ fn parse_dismiss_payload(payload: &str) -> Option<(RemoteTagKind, String)> {
         return None;
     }
     Some((kind, name.to_string()))
+}
+
+fn format_pair_set(set: &HashSet<(String, RemoteTagKind)>) -> String {
+    let mut pairs: Vec<String> = set.iter().map(|(n, k)| format!("{n}:{k:?}")).collect();
+    pairs.sort();
+    pairs.join(",")
 }
 
 fn remote_in_state(remote: &RemoteFile, kind: RemoteTagKind) -> bool {
@@ -175,6 +182,17 @@ impl ZellijPlugin for State {
                                                         _ => 1,
                                                     };
                                             }
+                                            state::SettingKey::LogLevel => {
+                                                self.settings.log_level =
+                                                    self.settings.log_level.cycle();
+                                                self.log(
+                                                    LogLevel::Info,
+                                                    &format!(
+                                                        "log_level set to {}",
+                                                        self.settings.log_level.label()
+                                                    ),
+                                                );
+                                            }
                                         }
                                         self.save_config();
                                     }
@@ -193,8 +211,24 @@ impl ZellijPlugin for State {
                 match context.get("type").map(|s| s.as_str()) {
                     Some("load_config") if exit_code == Some(0) => {
                         let raw = String::from_utf8_lossy(&stdout);
-                        if let Ok(settings) = serde_json::from_str::<Settings>(raw.trim()) {
-                            self.settings = settings;
+                        match serde_json::from_str::<Settings>(raw.trim()) {
+                            Ok(settings) => {
+                                self.settings = settings;
+                                self.log(
+                                    LogLevel::Debug,
+                                    &format!(
+                                        "load_config: ok log_level={} beep={:?}",
+                                        self.settings.log_level.label(),
+                                        self.settings.beep
+                                    ),
+                                );
+                            }
+                            Err(e) => {
+                                self.log(
+                                    LogLevel::Warn,
+                                    &format!("load_config: parse error {}", e),
+                                );
+                            }
                         }
                         self.config_loaded = true;
                         true
@@ -209,6 +243,7 @@ impl ZellijPlugin for State {
                         true
                     }
                     Some("write_state") => false,
+                    Some("write_log") => false,
                     _ => false,
                 }
             }
@@ -271,8 +306,21 @@ impl ZellijPlugin for State {
                 };
                 let payload: HookPayload = match serde_json::from_str(payload_str) {
                     Ok(p) => p,
-                    Err(_) => return false,
+                    Err(e) => {
+                        self.log(
+                            LogLevel::Warn,
+                            &format!("pipe(zellaude): parse error {}", e),
+                        );
+                        return false;
+                    }
                 };
+                self.log(
+                    LogLevel::Debug,
+                    &format!(
+                        "pipe(zellaude): hook_event={} pane_id={} session_id={:?} tool={:?}",
+                        payload.hook_event, payload.pane_id, payload.session_id, payload.tool_name
+                    ),
+                );
                 event_handler::handle_hook_event(self, payload);
                 true
             }
@@ -294,6 +342,13 @@ impl ZellijPlugin for State {
                 // Another instance broadcast new settings
                 if let Some(ref payload) = pipe_message.payload {
                     if let Ok(settings) = serde_json::from_str::<Settings>(payload) {
+                        self.log(
+                            LogLevel::Trace,
+                            &format!(
+                                "pipe(settings): apply log_level={}",
+                                settings.log_level.label()
+                            ),
+                        );
                         self.settings = settings;
                         return true;
                     }
@@ -306,6 +361,10 @@ impl ZellijPlugin for State {
                     if let Ok(sessions) =
                         serde_json::from_str::<BTreeMap<u32, SessionInfo>>(payload)
                     {
+                        self.log(
+                            LogLevel::Trace,
+                            &format!("pipe(sync): incoming {} sessions", sessions.len()),
+                        );
                         self.merge_sessions(sessions);
                         return true;
                     }
@@ -470,6 +529,42 @@ impl State {
         run_command(&["sh", "-c", &cmd], ctx);
     }
 
+    /// Append one line to the disk-backed debug log, gated on the
+    /// `log_level` setting. Fire-and-forget via run_command (WASM plugins
+    /// have no direct fs access). `printf '%s\n' >> file` writes shorter
+    /// than PIPE_BUF (4096B) are atomic, so concurrent appends from
+    /// different plugin instances don't tear.
+    ///
+    /// TODO: no log rotation. Fine while `log_level` defaults to `Off`, but
+    /// if a future change makes a non-Off level the default, this file will
+    /// grow unbounded — add a size cap or daily rollover at that point.
+    fn log(&self, level: LogLevel, msg: &str) {
+        if self.settings.log_level < level {
+            return;
+        }
+        // UTC — Zellij plugins have no access to the host timezone, and
+        // SystemTime is epoch-based. Pair with the raw `now_ms` on each
+        // line so a reader chasing a clock-skew ghost can confirm.
+        let now_ms = unix_now_ms();
+        let secs = now_ms / 1000;
+        let ms = now_ms % 1000;
+        let hh = (secs / 3600) % 24;
+        let mm = (secs / 60) % 60;
+        let ss = secs % 60;
+        let session = self.zellij_session_name.as_deref().unwrap_or("-");
+        let line = format!(
+            "[{hh:02}:{mm:02}:{ss:02}.{ms:03}Z {now_ms}] [{}] [{session}] {msg}",
+            level.label()
+        );
+        let line_esc = line.replace('\'', "'\\''");
+        let cmd = format!(
+            "mkdir -p \"$HOME/.config/zellij/plugins\" && printf '%s\\n' '{line_esc}' >> \"{LOG_FILE}\" 2>/dev/null"
+        );
+        let mut ctx = BTreeMap::new();
+        ctx.insert("type".into(), "write_log".into());
+        run_command(&["sh", "-c", &cmd], ctx);
+    }
+
     fn merge_sessions(&mut self, incoming: BTreeMap<u32, SessionInfo>) {
         for (pane_id, mut session) in incoming {
             let dominated = self
@@ -503,14 +598,34 @@ impl State {
 
     fn write_own_state(&mut self) {
         let Some(name) = self.zellij_session_name.clone() else {
+            self.log(
+                LogLevel::Trace,
+                "write_own_state: skip (no zellij_session_name)",
+            );
             return;
         };
         let safe = Self::sanitize_session_name(&name);
         let payload = RemoteFile {
-            session_name: name,
+            session_name: name.clone(),
             sessions: self.sessions.clone(),
             wrote_at_ms: unix_now_ms(),
         };
+        if self.settings.log_level >= LogLevel::Trace {
+            let acts: Vec<String> = self
+                .sessions
+                .values()
+                .map(|s| format!("{:?}", s.activity))
+                .collect();
+            self.log(
+                LogLevel::Trace,
+                &format!(
+                    "write_own_state: session={} sessions={} activities=[{}]",
+                    name,
+                    self.sessions.len(),
+                    acts.join(",")
+                ),
+            );
+        }
         let Ok(json) = serde_json::to_string(&payload) else {
             return;
         };
@@ -529,6 +644,7 @@ impl State {
     }
 
     fn poll_remote_state(&mut self) {
+        self.log(LogLevel::Trace, "poll_remote_state: start");
         // Portable across GNU and BSD shells: avoid `xargs -r`.
         // The `if [ -n "$(ls ...)" ]` guard returns `[]` when the dir is empty
         // or missing, instead of letting jq see a literal `*.json`.
@@ -543,21 +659,75 @@ impl State {
     }
 
     fn merge_remote_state(&mut self, raw: &str) {
-        let Ok(files) = serde_json::from_str::<Vec<RemoteFile>>(raw.trim()) else {
-            return;
+        let raw_trim = raw.trim();
+        let files = match serde_json::from_str::<Vec<RemoteFile>>(raw_trim) {
+            Ok(f) => f,
+            Err(e) => {
+                self.log(
+                    LogLevel::Warn,
+                    &format!(
+                        "merge_remote_state: parse error len={} err={}",
+                        raw_trim.len(),
+                        e
+                    ),
+                );
+                return;
+            }
         };
+        self.log(
+            LogLevel::Debug,
+            &format!(
+                "merge_remote_state: parsed {} files (raw {} bytes)",
+                files.len(),
+                raw_trim.len()
+            ),
+        );
         let now_ms = unix_now_ms();
         let own = self.zellij_session_name.as_deref();
         self.remote_sessions.clear();
         for f in files {
             if Some(f.session_name.as_str()) == own {
+                self.log(
+                    LogLevel::Trace,
+                    &format!("merge_remote_state: skip own session {}", f.session_name),
+                );
                 continue;
             }
+            let age_ms = now_ms.saturating_sub(f.wrote_at_ms);
             if f.wrote_at_ms + 30_000 < now_ms {
+                self.log(
+                    LogLevel::Trace,
+                    &format!(
+                        "merge_remote_state: drop stale {} age_ms={}",
+                        f.session_name, age_ms
+                    ),
+                );
                 continue;
             }
+            let acts: Vec<String> = f
+                .sessions
+                .values()
+                .map(|s| format!("{:?}", s.activity))
+                .collect();
+            self.log(
+                LogLevel::Trace,
+                &format!(
+                    "merge_remote_state: keep {} age_ms={} sessions={} activities=[{}]",
+                    f.session_name,
+                    age_ms,
+                    f.sessions.len(),
+                    acts.join(",")
+                ),
+            );
             self.remote_sessions.insert(f.session_name.clone(), f);
         }
+        self.log(
+            LogLevel::Debug,
+            &format!(
+                "merge_remote_state: after-filter remote_sessions={}",
+                self.remote_sessions.len()
+            ),
+        );
         self.reconcile_remote_tags();
     }
 
@@ -583,25 +753,66 @@ impl State {
                 }
             }
         }
+        if self.settings.log_level >= LogLevel::Debug {
+            let cur = format_pair_set(&current_in_state);
+            let prev = format_pair_set(&self.remote_in_state_prev);
+            self.log(
+                LogLevel::Debug,
+                &format!(
+                    "reconcile: current_in_state=[{cur}] prev=[{prev}] persist={}",
+                    self.settings.persist_cross_session_tags
+                ),
+            );
+        }
         for key in &current_in_state {
             if !self.remote_in_state_prev.contains(key) {
                 self.beep_remote_pending = true;
+                self.log(
+                    LogLevel::Info,
+                    &format!(
+                        "reconcile: NEW transition {}:{:?} -> beep_remote_pending=true",
+                        key.0, key.1
+                    ),
+                );
             }
         }
+        // Promote current to prev *before* the retain so we can reuse it as
+        // the membership check below — `current_in_state` already encodes
+        // "remote exists AND in matching state", which is exactly what the
+        // non-persist branch needs.
         self.remote_in_state_prev = current_in_state;
 
         // Drop entries whose remote no longer exists, or — when persistence
         // is off — whose remote has left the matching state.
         let persist = self.settings.persist_cross_session_tags;
+        let log_level = self.settings.log_level;
+        let mut dropped: Vec<(String, RemoteTagKind)> = Vec::new();
+        let remote_sessions_snapshot: HashSet<&str> =
+            self.remote_sessions.keys().map(|s| s.as_str()).collect();
+        let in_state = &self.remote_in_state_prev;
         self.remote_tag_order.retain(|(name, kind)| {
-            let Some(remote) = self.remote_sessions.get(name) else {
+            let key = (name.clone(), *kind);
+            if !remote_sessions_snapshot.contains(name.as_str()) {
+                if log_level >= LogLevel::Trace {
+                    dropped.push(key);
+                }
                 return false;
-            };
+            }
             if persist {
                 return true;
             }
-            remote_in_state(remote, *kind)
+            let keep = in_state.contains(&key);
+            if !keep && log_level >= LogLevel::Trace {
+                dropped.push(key);
+            }
+            keep
         });
+        for (n, k) in &dropped {
+            self.log(
+                LogLevel::Trace,
+                &format!("reconcile: drop tag {}:{:?}", n, k),
+            );
+        }
 
         // Add any newly-matching remote not yet in the queue and not dismissed.
         // Iterate Waiting first so a remote that flips Waiting→Done in one
@@ -613,9 +824,17 @@ impl State {
                     continue;
                 }
                 if self.remote_tag_dismissed.contains(&key) {
+                    self.log(
+                        LogLevel::Trace,
+                        &format!("reconcile: skip dismissed {}:{:?}", key.0, key.1),
+                    );
                     continue;
                 }
                 if remote_in_state(remote, kind) {
+                    self.log(
+                        LogLevel::Trace,
+                        &format!("reconcile: enqueue {}:{:?}", key.0, key.1),
+                    );
                     self.remote_tag_order.push_back(key);
                 }
             }
