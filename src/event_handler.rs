@@ -48,7 +48,17 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
         }
         "Stop" => Activity::Done,
         "SubagentStop" => Activity::AgentDone,
-        _ => Activity::Idle,
+        // Unknown event — leave existing state alone. Falling through to
+        // Idle would silently clobber legitimate states (e.g. Waiting→Idle
+        // when an unrecognized hook like PreCompact fires during a permission
+        // prompt), making the bar lie about what the session is doing.
+        _ => {
+            state.log(
+                crate::state::LogLevel::Debug,
+                &format!("handle_hook_event: ignoring unknown event {event:?}"),
+            );
+            return;
+        }
     };
 
     let (tab_index, tab_name) = state.pane_to_tab.get(&payload.pane_id).cloned().unzip();
