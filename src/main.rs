@@ -40,12 +40,6 @@ fn parse_dismiss_payload(payload: &str) -> Option<(RemoteTagKind, String)> {
     Some((kind, name.to_string()))
 }
 
-fn format_pair_set(set: &HashSet<(String, RemoteTagKind)>) -> String {
-    let mut pairs: Vec<String> = set.iter().map(|(n, k)| format!("{n}:{k:?}")).collect();
-    pairs.sort();
-    pairs.join(",")
-}
-
 fn remote_in_state(remote: &RemoteFile, kind: RemoteTagKind) -> bool {
     remote.sessions.values().any(|s| match kind {
         RemoteTagKind::Waiting => matches!(s.activity, state::Activity::Waiting),
@@ -381,7 +375,7 @@ impl ZellijPlugin for State {
                     if let Some((kind, name)) = parse_dismiss_payload(payload) {
                         let key = (name, kind);
                         self.remote_tag_order.retain(|entry| entry != &key);
-                        self.remote_tag_dismissed.insert(key);
+                        self.remote_tag_presented.insert(key);
                         return true;
                     }
                 }
@@ -526,15 +520,27 @@ impl State {
     /// Emit a terminal bell to the host pty. Writing `\x07` into the
     /// status-bar render buffer doesn't work: Zellij parses that stream
     /// through its own grid state machine and consumes BEL bytes instead
-    /// of forwarding them to the outer pty. So we shell out and write `\a`
-    /// to a tty that *is* connected to the user's terminal — `$SSH_TTY`
-    /// when present, else `/dev/tty`. The Zellij server inherits SSH_TTY
-    /// from the login shell that started it, so this reaches the same
-    /// terminal that hears bells from regular panes. Fire-and-forget.
+    /// of forwarding them to the outer pty. We also can't trust the Zellij
+    /// server's `$SSH_TTY` env — the server is daemonized at first launch
+    /// and inherits whichever pty started it; that pty may be long gone
+    /// while the user is now attached from a different SSH session.
+    ///
+    /// Instead, scan `/proc` for live Zellij client processes (`zellij`
+    /// with no `--server` arg) and write `\a` to each one's stdout. Each
+    /// client's stdout is the pty of an attached terminal, so this reaches
+    /// the same place that hears bells from regular panes — and rings on
+    /// every attached client, matching native bell behavior. Linux-only;
+    /// the rest of the codebase already assumes Linux/`/proc`-style FS
+    /// indirectly via `run_command`. Fire-and-forget.
     fn ring_terminal_bell(&self) {
-        let cmd = "{ [ -n \"$SSH_TTY\" ] && [ -w \"$SSH_TTY\" ] && \
-                   printf '\\a' > \"$SSH_TTY\"; } || \
-                   printf '\\a' > /dev/tty 2>/dev/null || true";
+        let cmd = "for pid in /proc/[0-9]*; do \
+                     [ \"$(cat \"$pid/comm\" 2>/dev/null)\" = \"zellij\" ] || continue; \
+                     grep -q -- --server \"$pid/cmdline\" 2>/dev/null && continue; \
+                     tty=$(readlink \"$pid/fd/1\" 2>/dev/null); \
+                     case \"$tty\" in /dev/pts/*) \
+                       [ -w \"$tty\" ] && printf '\\a' > \"$tty\" 2>/dev/null;; \
+                     esac; \
+                   done";
         let mut ctx = BTreeMap::new();
         ctx.insert("type".into(), "ring_bell".into());
         run_command(&["sh", "-c", cmd], ctx);
@@ -743,112 +749,122 @@ impl State {
     }
 
     fn reconcile_remote_tags(&mut self) {
-        // Drop "dismissed" markers once the remote leaves the matching state
-        // (or disappears) — that gates user-click suppression so the next
-        // matching event for the same remote re-shows the tag.
-        self.remote_tag_dismissed.retain(|(name, kind)| {
-            self.remote_sessions
-                .get(name)
-                .is_some_and(|r| remote_in_state(r, *kind))
-        });
+        // Lifecycle: a tag is presented at most once per remote-session
+        // lifetime, where "lifetime" ends when the remote's state file is
+        // evicted from `remote_sessions` (no heartbeat for 30s — see
+        // `merge_remote_state`). This keeps `/loop`'s repeated Stop hooks
+        // and our own Done→Idle staleness flip from re-triggering the tag
+        // and bell every cycle. Waiting is more urgent than Done: if both
+        // would qualify for the same remote, Waiting wins and supersedes
+        // any existing Done (clicking through to the prompt is the action
+        // the user wants).
 
-        // Compute the current set of (remote, kind) pairs in matching state,
-        // and beep on any pair that wasn't in the previous set — i.e. a true
-        // transition into Waiting or Done. Done independently of the tag
-        // queue so persist-tag mode doesn't suppress beeps on repeat events.
-        let mut current_in_state: HashSet<(String, RemoteTagKind)> = HashSet::new();
-        for kind in [RemoteTagKind::Waiting, RemoteTagKind::Done] {
-            for (name, remote) in &self.remote_sessions {
-                if remote_in_state(remote, kind) {
-                    current_in_state.insert((name.clone(), kind));
-                }
+        // Drop "presented" markers for remotes that have disappeared. Lets
+        // the tag re-arm if the remote starts publishing state again later.
+        let live_remotes: HashSet<&str> =
+            self.remote_sessions.keys().map(|s| s.as_str()).collect();
+        self.remote_tag_presented
+            .retain(|(name, _)| live_remotes.contains(name.as_str()));
+
+        // Decide each remote's desired tag kind: Waiting > Done > none.
+        let mut desired: BTreeMap<String, RemoteTagKind> = BTreeMap::new();
+        for (name, remote) in &self.remote_sessions {
+            if remote_in_state(remote, RemoteTagKind::Waiting) {
+                desired.insert(name.clone(), RemoteTagKind::Waiting);
+            } else if remote_in_state(remote, RemoteTagKind::Done) {
+                desired.insert(name.clone(), RemoteTagKind::Done);
             }
         }
-        if self.settings.log_level >= LogLevel::Debug {
-            let cur = format_pair_set(&current_in_state);
-            let prev = format_pair_set(&self.remote_in_state_prev);
+
+        // Bootstrap: on the very first poll after this plugin instance
+        // starts, suppress notification for whatever's already on disk.
+        // Otherwise attaching to a different Zellij session (Ctrl+o,w) and
+        // landing on a fresh plugin would replay a bell + tag for the
+        // session you just left, even though that's the state you already
+        // saw locally. By marking everything currently desired as already
+        // "presented" before the enqueue loop runs, we silence first-poll
+        // notifications without losing the ability to react when a remote
+        // *transitions* into a new state later.
+        if !self.remote_bootstrap_done {
+            for (name, kind) in &desired {
+                self.remote_tag_presented.insert((name.clone(), *kind));
+            }
+            self.remote_bootstrap_done = true;
             self.log(
                 LogLevel::Debug,
                 &format!(
-                    "reconcile: current_in_state=[{cur}] prev=[{prev}] persist={}",
+                    "reconcile: bootstrap suppressed {} pre-existing remote tag(s)",
+                    desired.len()
+                ),
+            );
+        }
+        if self.settings.log_level >= LogLevel::Debug {
+            let mut pairs: Vec<String> =
+                desired.iter().map(|(n, k)| format!("{n}:{k:?}")).collect();
+            pairs.sort();
+            self.log(
+                LogLevel::Debug,
+                &format!(
+                    "reconcile: desired=[{}] persist={}",
+                    pairs.join(","),
                     self.settings.persist_cross_session_tags
                 ),
             );
         }
-        for key in &current_in_state {
-            if !self.remote_in_state_prev.contains(key) {
-                self.beep_remote_pending = true;
-                self.log(
-                    LogLevel::Info,
-                    &format!(
-                        "reconcile: NEW transition {}:{:?} -> beep_remote_pending=true",
-                        key.0, key.1
-                    ),
-                );
-            }
-        }
-        // Promote current to prev *before* the retain so we can reuse it as
-        // the membership check below — `current_in_state` already encodes
-        // "remote exists AND in matching state", which is exactly what the
-        // non-persist branch needs.
-        self.remote_in_state_prev = current_in_state;
 
-        // Drop entries whose remote no longer exists, or — when persistence
-        // is off — whose remote has left the matching state.
+        // If Waiting supersedes a queued Done for the same remote, evict the
+        // Done entry and mark it presented so it can't pop back later. Mirror
+        // the eviction to peer instances so all tabs agree.
         let persist = self.settings.persist_cross_session_tags;
         let log_level = self.settings.log_level;
-        let mut dropped: Vec<(String, RemoteTagKind)> = Vec::new();
-        let remote_sessions_snapshot: HashSet<&str> =
-            self.remote_sessions.keys().map(|s| s.as_str()).collect();
-        let in_state = &self.remote_in_state_prev;
+        let mut superseded: Vec<(String, RemoteTagKind)> = Vec::new();
         self.remote_tag_order.retain(|(name, kind)| {
-            let key = (name.clone(), *kind);
-            if !remote_sessions_snapshot.contains(name.as_str()) {
+            // Drop entries for remotes that no longer exist.
+            if !live_remotes.contains(name.as_str()) {
                 if log_level >= LogLevel::Trace {
-                    dropped.push(key);
+                    superseded.push((name.clone(), *kind));
                 }
                 return false;
             }
-            if persist {
-                return true;
+            // If a more urgent kind is desired for this remote, evict.
+            if matches!(kind, RemoteTagKind::Done)
+                && desired.get(name) == Some(&RemoteTagKind::Waiting)
+            {
+                superseded.push((name.clone(), *kind));
+                return false;
             }
-            let keep = in_state.contains(&key);
-            if !keep && log_level >= LogLevel::Trace {
-                dropped.push(key);
+            // In non-persist mode, drop tags whose remote has left the
+            // matching state. The presented marker stays, so it won't return.
+            if !persist && desired.get(name) != Some(kind) {
+                if log_level >= LogLevel::Trace {
+                    superseded.push((name.clone(), *kind));
+                }
+                return false;
             }
-            keep
+            true
         });
-        for (n, k) in &dropped {
-            self.log(
-                LogLevel::Trace,
-                &format!("reconcile: drop tag {}:{:?}", n, k),
-            );
+        for (n, k) in &superseded {
+            self.log(LogLevel::Trace, &format!("reconcile: drop tag {n}:{k:?}"));
+            self.remote_tag_presented.insert((n.clone(), *k));
         }
 
-        // Add any newly-matching remote not yet in the queue and not dismissed.
-        // Iterate Waiting first so a remote that flips Waiting→Done in one
-        // poll cycle gets the more urgent tag enqueued ahead of the other.
-        for kind in [RemoteTagKind::Waiting, RemoteTagKind::Done] {
-            for (name, remote) in &self.remote_sessions {
-                let key = (name.clone(), kind);
-                if self.remote_tag_order.iter().any(|entry| entry == &key) {
-                    continue;
-                }
-                if self.remote_tag_dismissed.contains(&key) {
-                    self.log(
-                        LogLevel::Trace,
-                        &format!("reconcile: skip dismissed {}:{:?}", key.0, key.1),
-                    );
-                    continue;
-                }
-                if remote_in_state(remote, kind) {
-                    self.log(
-                        LogLevel::Trace,
-                        &format!("reconcile: enqueue {}:{:?}", key.0, key.1),
-                    );
-                    self.remote_tag_order.push_back(key);
-                }
+        // Enqueue tags for remotes whose desired kind hasn't been presented
+        // yet this lifetime. Beep once per actual enqueue.
+        for (name, kind) in desired {
+            let key = (name, kind);
+            if self.remote_tag_presented.contains(&key) {
+                continue;
             }
+            if self.remote_tag_order.iter().any(|entry| entry == &key) {
+                continue;
+            }
+            self.log(
+                LogLevel::Info,
+                &format!("reconcile: enqueue {}:{:?}", key.0, key.1),
+            );
+            self.remote_tag_order.push_back(key.clone());
+            self.remote_tag_presented.insert(key);
+            self.beep_remote_pending = true;
         }
     }
 }

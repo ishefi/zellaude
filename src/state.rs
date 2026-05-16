@@ -276,19 +276,22 @@ pub struct State {
     pub config_loaded: bool,
     pub hooks_installed: bool,
     pub remote_sessions: BTreeMap<String, RemoteFile>,
-    /// (session, kind) pairs whose remote was in the matching activity state
-    /// on the previous poll. Used to detect transitions for cross-session
-    /// beep — a pair appearing here for the first time means the remote just
-    /// entered Waiting or Done/AgentDone, which is what we want to beep on.
-    /// Independent of `remote_tag_order` so persist-tag mode doesn't suppress
-    /// beeps on repeat transitions.
-    pub remote_in_state_prev: HashSet<(String, RemoteTagKind)>,
     pub remote_tag_order: VecDeque<(String, RemoteTagKind)>,
-    /// (Name, kind) pairs dismissed via click. Suppresses re-adding to the
-    /// queue until the remote leaves the matching activity state (Waiting
-    /// or Done/AgentDone) at least once — without this, a click on a
-    /// remote still in the matching state pops back ~1s later via reconcile.
-    pub remote_tag_dismissed: HashSet<(String, RemoteTagKind)>,
+    /// (name, kind) pairs we've already shown for the current remote-session
+    /// lifetime. Once a tag has been presented (or dismissed via click, or
+    /// superseded by a more urgent kind), we record it here so it can't pop
+    /// back when the remote cycles through the same state again — e.g. a
+    /// `/loop` repeatedly hitting Stop, or `cleanup_stale_sessions` flipping
+    /// Done→Idle and the next iteration flipping it back. Cleared only when
+    /// the remote disappears from `remote_sessions` entirely (file evicted
+    /// after 30s of no heartbeats).
+    pub remote_tag_presented: HashSet<(String, RemoteTagKind)>,
+    /// False until the first `merge_remote_state` completes. The first poll
+    /// seeds `remote_tag_presented` with whatever Done/Waiting pairs already
+    /// exist on disk so attaching to a different Zellij session via Ctrl+o,w
+    /// doesn't replay a bell + tag for state the user already saw locally
+    /// before detaching. Only subsequent transitions notify.
+    pub remote_bootstrap_done: bool,
     pub remote_tag_click_regions: Vec<RemoteTagClickRegion>,
     pub state_dirty: bool,
     pub last_write_ms: u64,
