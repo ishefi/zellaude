@@ -15,8 +15,7 @@ fn hook_script_content() -> String {
 }
 
 const CLAUDE_EVENTS: &str = r#"["PreToolUse","PostToolUse","PostToolUseFailure","UserPromptSubmit","PermissionRequest","Notification","Stop","SubagentStop","SessionStart","SessionEnd"]"#;
-const CODEX_EVENTS: &str =
-    r#"["SessionStart","PreToolUse","PostToolUse","UserPromptSubmit","PermissionRequest","Stop"]"#;
+const CODEX_EVENTS: &str = r#"["SessionStart","PreToolUse","PostToolUse","UserPromptSubmit","PermissionRequest","Notification","Stop","SessionEnd"]"#;
 
 const INSTALL_TEMPLATE: &str = r##"set -e
 HOOK_PATH="$HOME/.config/zellij/plugins/zellaude-hook.sh"

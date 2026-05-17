@@ -14,7 +14,7 @@ CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 CODEX_HOOKS="$HOME/.codex/hooks.json"
 
 CLAUDE_EVENTS='["PreToolUse","PostToolUse","PostToolUseFailure","UserPromptSubmit","PermissionRequest","Notification","Stop","SubagentStop","SessionStart","SessionEnd"]'
-CODEX_EVENTS='["SessionStart","PreToolUse","PostToolUse","UserPromptSubmit","PermissionRequest","Stop"]'
+CODEX_EVENTS='["SessionStart","PreToolUse","PostToolUse","UserPromptSubmit","PermissionRequest","Notification","Stop","SessionEnd"]'
 
 if ! command -v jq &>/dev/null; then
   echo "Error: jq is required. Install with: brew install jq" >&2

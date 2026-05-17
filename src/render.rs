@@ -86,7 +86,7 @@ fn activity_style(activity: &Activity, agent: Agent) -> Style {
             b: 60,
         },
         Activity::Notification => Style {
-            symbol: "◇",
+            symbol: "✦",
             r: 200,
             g: 200,
             b: 100,
