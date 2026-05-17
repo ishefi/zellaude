@@ -30,9 +30,7 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
 
     let activity = match event {
         "SessionStart" => Activity::Init,
-        "PreToolUse" => {
-            Activity::Tool(payload.tool_name.clone().unwrap_or_default())
-        }
+        "PreToolUse" => Activity::Tool(payload.tool_name.clone().unwrap_or_default()),
         "PostToolUse" | "PostToolUseFailure" => Activity::Thinking,
         "UserPromptSubmit" => Activity::Thinking,
         "PermissionRequest" => Activity::Waiting,
@@ -51,11 +49,7 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
         _ => Activity::Idle,
     };
 
-    let (tab_index, tab_name) = state
-        .pane_to_tab
-        .get(&payload.pane_id)
-        .cloned()
-        .unzip();
+    let (tab_index, tab_name) = state.pane_to_tab.get(&payload.pane_id).cloned().unzip();
 
     let session = state
         .sessions
@@ -69,7 +63,9 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
             last_event_ts: 0,
             cwd: None,
             last_ts_ms: 0,
+            agent: payload.agent,
         });
+    session.agent = payload.agent;
 
     if matches!(activity, Activity::Waiting) {
         match state.settings.flash {

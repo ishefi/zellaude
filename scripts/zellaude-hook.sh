@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# zellaude-hook.sh — Claude Code hook → zellij pipe bridge
+# zellaude-hook.sh — Claude Code / Codex CLI hook → zellij pipe bridge
 # Forwards hook events to the zellaude Zellij plugin via pipe.
 #
 # Usage in ~/.claude/settings.json hooks:
-#   "command": "/path/to/zellaude-hook.sh"
+#   "command": "/path/to/zellaude-hook.sh claude"
+# Usage in ~/.codex/hooks.json hooks:
+#   "command": "/path/to/zellaude-hook.sh codex"
+
+# Agent type (claude|codex); default claude for backward compatibility.
+AGENT="${1:-claude}"
 
 # Exit silently if not running inside Zellij
 [ -z "$ZELLIJ_SESSION_NAME" ] && exit 0
@@ -34,6 +39,7 @@ PAYLOAD=$(jq -nc \
   --arg zellij_session "$ZELLIJ_SESSION_NAME" \
   --arg term_program "${TERM_PROGRAM:-}" \
   --arg ts_ms "$TS_MS" \
+  --arg agent "$AGENT" \
   '{
     pane_id: ($pane_id | tonumber),
     session_id: $session_id,
@@ -42,7 +48,8 @@ PAYLOAD=$(jq -nc \
     cwd: (if $cwd == "" then null else $cwd end),
     zellij_session: $zellij_session,
     term_program: (if $term_program == "" then null else $term_program end),
-    ts_ms: ($ts_ms | tonumber)
+    ts_ms: ($ts_ms | tonumber),
+    agent: $agent
   }')
 
 # Permission request: bell + desktop notification
@@ -97,7 +104,10 @@ if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
   if [ "$SHOULD_NOTIFY" = true ]; then
     TOOL_SUFFIX=""
     [ -n "$TOOL_NAME" ] && TOOL_SUFFIX=" — $TOOL_NAME"
-    TITLE="⚠ Claude Code"
+    case "$AGENT" in
+      codex) TITLE="⚠ Codex CLI" ;;
+      *)     TITLE="⚠ Claude Code" ;;
+    esac
     MESSAGE="Permission requested${TOOL_SUFFIX}"
 
     # Rate-limit: one notification per pane per 10 seconds

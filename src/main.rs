@@ -4,7 +4,9 @@ mod render;
 mod state;
 mod tab_pane_map;
 
-use state::{unix_now, unix_now_ms, HookPayload, MenuAction, SessionInfo, Settings, State, ViewMode};
+use state::{
+    unix_now, unix_now_ms, HookPayload, MenuAction, SessionInfo, Settings, State, ViewMode,
+};
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
@@ -105,8 +107,7 @@ impl ZellijPlugin for State {
                                                     self.settings.notifications.cycle();
                                             }
                                             state::SettingKey::Flash => {
-                                                self.settings.flash =
-                                                    self.settings.flash.cycle();
+                                                self.settings.flash = self.settings.flash.cycle();
                                             }
                                             state::SettingKey::ElapsedTime => {
                                                 self.settings.elapsed_time =
@@ -293,7 +294,9 @@ impl State {
 
     fn has_active_flashes(&self) -> bool {
         let now = unix_now_ms();
-        self.flash_deadlines.values().any(|&deadline| now < deadline)
+        self.flash_deadlines
+            .values()
+            .any(|&deadline| now < deadline)
     }
 
     fn cleanup_expired_flashes(&mut self) -> bool {
@@ -320,15 +323,13 @@ impl State {
 
     fn broadcast_sessions(&self) {
         let mut msg = MessageToPlugin::new("zellaude:sync");
-        msg.message_payload =
-            Some(serde_json::to_string(&self.sessions).unwrap_or_default());
+        msg.message_payload = Some(serde_json::to_string(&self.sessions).unwrap_or_default());
         pipe_message_to_plugin(msg);
     }
 
     fn broadcast_settings(&self) {
         let mut msg = MessageToPlugin::new("zellaude:settings");
-        msg.message_payload =
-            Some(serde_json::to_string(&self.settings).unwrap_or_default());
+        msg.message_payload = Some(serde_json::to_string(&self.settings).unwrap_or_default());
         pipe_message_to_plugin(msg);
     }
 
