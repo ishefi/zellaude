@@ -119,6 +119,7 @@ if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
             terminal-notifier \
               -title "$TITLE" \
               -message "$MESSAGE" \
+              -group "zellaude-permission-${ZELLIJ_PANE_ID}" \
               -execute "$FOCUS_CMD" &
           else
             osascript -e "display notification \"$MESSAGE\" with title \"$TITLE\"" &
@@ -133,6 +134,27 @@ if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
     fi
   fi
 fi
+
+# Dismiss the pending permission notification once the user has acted on it.
+# These events all imply the in-terminal prompt is gone:
+#   PostToolUse / PostToolUseFailure — the tool ran or was blocked (accept/deny)
+#   UserPromptSubmit                 — the user typed a new message
+#   Stop / SessionEnd                — end of turn / session (safety net)
+# PreToolUse is intentionally excluded: it fires before the prompt is shown.
+case "$HOOK_EVENT" in
+  PostToolUse|PostToolUseFailure|UserPromptSubmit|Stop|SessionEnd)
+    case "$(uname)" in
+      Darwin)
+        if command -v terminal-notifier >/dev/null 2>&1; then
+          terminal-notifier -remove "zellaude-permission-${ZELLIJ_PANE_ID}" >/dev/null 2>&1
+        fi
+        ;;
+      # Linux: notify-send offers no group-remove; left for a follow-up.
+    esac
+    # Reset the rate-limit so the next request can notify without the 10s delay.
+    rm -f "/tmp/zellaude-notify-${ZELLIJ_PANE_ID}" 2>/dev/null || true
+    ;;
+esac
 
 # Send to plugin (hook is already async, no need to background)
 zellij pipe --name "zellaude" -- "$PAYLOAD"
