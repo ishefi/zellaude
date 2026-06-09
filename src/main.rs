@@ -1,5 +1,7 @@
 mod event_handler;
+#[cfg(not(test))]
 mod installer;
+mod palette;
 mod render;
 mod state;
 mod tab_pane_map;
@@ -12,8 +14,10 @@ const DONE_TIMEOUT: u64 = 30;
 const TIMER_INTERVAL: f64 = 1.0;
 const FLASH_TICK: f64 = 0.25;
 
+#[cfg(not(test))]
 register_plugin!(State);
 
+#[cfg(not(test))]
 impl ZellijPlugin for State {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
         request_permission(&[
@@ -314,10 +318,12 @@ impl State {
         })
     }
 
+    #[cfg(not(test))]
     fn request_sync(&self) {
         pipe_message_to_plugin(MessageToPlugin::new("zellaude:request"));
     }
 
+    #[cfg(not(test))]
     fn broadcast_sessions(&self) {
         let mut msg = MessageToPlugin::new("zellaude:sync");
         msg.message_payload =
@@ -325,6 +331,7 @@ impl State {
         pipe_message_to_plugin(msg);
     }
 
+    #[cfg(not(test))]
     fn broadcast_settings(&self) {
         let mut msg = MessageToPlugin::new("zellaude:settings");
         msg.message_payload =
@@ -332,6 +339,7 @@ impl State {
         pipe_message_to_plugin(msg);
     }
 
+    #[cfg(not(test))]
     fn load_config(&self) {
         let mut ctx = BTreeMap::new();
         ctx.insert("type".into(), "load_config".into());
@@ -345,6 +353,7 @@ impl State {
         );
     }
 
+    #[cfg(not(test))]
     fn save_config(&self) {
         if !self.config_loaded {
             return;
