@@ -65,9 +65,109 @@ impl Default for Palette {
     }
 }
 
+/// A single overridable color role, identified in config by its snake_case key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaletteRole {
+    Thinking,
+    Tool,
+    Waiting,
+    Success,
+    Notification,
+    AccentBlue,
+    Neutral,
+    BarBg,
+    PrefixBg,
+    PrefixBgActive,
+    TabActiveBg,
+    TabInactiveBg,
+    FlashBg,
+    Text,
+    TextDim,
+    TextMuted,
+    Disabled,
+    Elapsed,
+    FlashText,
+    Fullscreen,
+}
+
+impl PaletteRole {
+    /// Map a config key to its role, or `None` if it is not a palette role.
+    pub fn from_key(key: &str) -> Option<Self> {
+        Some(match key {
+            "thinking" => Self::Thinking,
+            "tool" => Self::Tool,
+            "waiting" => Self::Waiting,
+            "success" => Self::Success,
+            "notification" => Self::Notification,
+            "accent_blue" => Self::AccentBlue,
+            "neutral" => Self::Neutral,
+            "bar_bg" => Self::BarBg,
+            "prefix_bg" => Self::PrefixBg,
+            "prefix_bg_active" => Self::PrefixBgActive,
+            "tab_active_bg" => Self::TabActiveBg,
+            "tab_inactive_bg" => Self::TabInactiveBg,
+            "flash_bg" => Self::FlashBg,
+            "text" => Self::Text,
+            "text_dim" => Self::TextDim,
+            "text_muted" => Self::TextMuted,
+            "disabled" => Self::Disabled,
+            "elapsed" => Self::Elapsed,
+            "flash_text" => Self::FlashText,
+            "fullscreen" => Self::Fullscreen,
+            _ => return None,
+        })
+    }
+}
+
+impl Palette {
+    /// Set the color for a single role.
+    pub fn set(&mut self, role: PaletteRole, c: Color) {
+        use PaletteRole::*;
+        match role {
+            Thinking => self.thinking = c,
+            Tool => self.tool = c,
+            Waiting => self.waiting = c,
+            Success => self.success = c,
+            Notification => self.notification = c,
+            AccentBlue => self.accent_blue = c,
+            Neutral => self.neutral = c,
+            BarBg => self.bar_bg = c,
+            PrefixBg => self.prefix_bg = c,
+            PrefixBgActive => self.prefix_bg_active = c,
+            TabActiveBg => self.tab_active_bg = c,
+            TabInactiveBg => self.tab_inactive_bg = c,
+            FlashBg => self.flash_bg = c,
+            Text => self.text = c,
+            TextDim => self.text_dim = c,
+            TextMuted => self.text_muted = c,
+            Disabled => self.disabled = c,
+            Elapsed => self.elapsed = c,
+            FlashText => self.flash_text = c,
+            Fullscreen => self.fullscreen = c,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn role_from_key_known_and_unknown() {
+        assert_eq!(PaletteRole::from_key("thinking"), Some(PaletteRole::Thinking));
+        assert_eq!(PaletteRole::from_key("tab_active_bg"), Some(PaletteRole::TabActiveBg));
+        assert_eq!(PaletteRole::from_key("fullscreen"), Some(PaletteRole::Fullscreen));
+        assert_eq!(PaletteRole::from_key("nope"), None);
+        assert_eq!(PaletteRole::from_key("theme_source"), None);
+    }
+
+    #[test]
+    fn set_changes_only_the_named_role() {
+        let mut p = Palette::default();
+        p.set(PaletteRole::Thinking, (1, 2, 3));
+        assert_eq!(p.thinking, (1, 2, 3));
+        assert_eq!(p.tool, Palette::default().tool);
+    }
 
     #[test]
     fn default_palette_matches_original_values() {
