@@ -173,7 +173,11 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     };
     let prefix_text = format!(" Zellaude{session_part} ");
     let prefix_width = display_width(&prefix_text);
-    let mode_pill_width = if show_mode { 1 + mode_text.len() + 1 } else { 0 };
+    let mode_pill_width = if show_mode {
+        1 + mode_text.len() + 1
+    } else {
+        0
+    };
     let total_prefix_width = prefix_width + mode_pill_width;
 
     // Render prefix segment (truncate if wider than cols)
@@ -334,7 +338,10 @@ fn render_tabs(
         let truncated = if max_name_len == 0 {
             String::new()
         } else if char_count > max_name_len {
-            let s: String = tab_name.chars().take(max_name_len.saturating_sub(1)).collect();
+            let s: String = tab_name
+                .chars()
+                .take(max_name_len.saturating_sub(1))
+                .collect();
             format!("{s}…")
         } else {
             tab_name.to_string()
@@ -483,12 +490,18 @@ fn render_tabs(
     }
 }
 
-fn notify_mode_label(p: &Palette, mode: NotifyMode) -> (&'static str, &'static str, String, String) {
+fn notify_mode_label(
+    p: &Palette,
+    mode: NotifyMode,
+) -> (&'static str, &'static str, String, String) {
     match mode {
         NotifyMode::Always => ("●", "Notify: always", fgc(p.success), fgc(p.text)),
-        NotifyMode::Unfocused => {
-            ("◐", "Notify: unfocused", fgc(p.fullscreen), fgc(p.fullscreen))
-        }
+        NotifyMode::Unfocused => (
+            "◐",
+            "Notify: unfocused",
+            fgc(p.fullscreen),
+            fgc(p.fullscreen),
+        ),
         NotifyMode::Never => ("○", "Notify: off", fgc(p.disabled), fgc(p.disabled)),
     }
 }
@@ -553,8 +566,7 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
     {
         let _ = write!(buf, "  ");
         *col += 2;
-        let (symbol, label, sym_color, label_color) =
-            flash_mode_label(&pal, state.settings.flash);
+        let (symbol, label, sym_color, label_color) = flash_mode_label(&pal, state.settings.flash);
         render_tristate(
             buf,
             col,
@@ -577,7 +589,11 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         } else {
             ("○", fgc(pal.disabled), fgc(pal.disabled))
         };
-        let label = if enabled { "Elapsed time: on" } else { "Elapsed time: off" };
+        let label = if enabled {
+            "Elapsed time: on"
+        } else {
+            "Elapsed time: off"
+        };
         render_tristate(
             buf,
             col,
@@ -600,7 +616,11 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         } else {
             ("○", fgc(pal.disabled), fgc(pal.disabled))
         };
-        let label = if enabled { "Mode indicator: on" } else { "Mode indicator: off" };
+        let label = if enabled {
+            "Mode indicator: on"
+        } else {
+            "Mode indicator: off"
+        };
         render_tristate(
             buf,
             col,

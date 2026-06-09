@@ -303,9 +303,9 @@ pub fn parse_config(config: &BTreeMap<String, String>) -> (ThemeSource, Vec<(Pal
         if let Some(role) = PaletteRole::from_key(key) {
             match parse_color(value) {
                 Some(color) => overrides.push((role, color)),
-                None => eprintln!(
-                    "zellaude: invalid color for {key:?}: {value:?} (keeping default)"
-                ),
+                None => {
+                    eprintln!("zellaude: invalid color for {key:?}: {value:?} (keeping default)")
+                }
             }
         }
     }
@@ -350,7 +350,10 @@ mod tests {
         let mut p = Palette::default();
         apply_overrides(
             &mut p,
-            &[(PaletteRole::Thinking, (1, 2, 3)), (PaletteRole::BarBg, (4, 5, 6))],
+            &[
+                (PaletteRole::Thinking, (1, 2, 3)),
+                (PaletteRole::BarBg, (4, 5, 6)),
+            ],
         );
         assert_eq!(p.thinking, (1, 2, 3));
         assert_eq!(p.bar_bg, (4, 5, 6));
@@ -368,10 +371,22 @@ mod tests {
                 emphasis_2: pc(5, 5, 5),
                 emphasis_3: pc(6, 6, 6),
             },
-            ribbon_selected: StyleDeclaration { background: pc(7, 7, 7), ..Default::default() },
-            ribbon_unselected: StyleDeclaration { background: pc(8, 8, 8), ..Default::default() },
-            exit_code_success: StyleDeclaration { base: pc(9, 9, 9), ..Default::default() },
-            exit_code_error: StyleDeclaration { base: pc(10, 10, 10), ..Default::default() },
+            ribbon_selected: StyleDeclaration {
+                background: pc(7, 7, 7),
+                ..Default::default()
+            },
+            ribbon_unselected: StyleDeclaration {
+                background: pc(8, 8, 8),
+                ..Default::default()
+            },
+            exit_code_success: StyleDeclaration {
+                base: pc(9, 9, 9),
+                ..Default::default()
+            },
+            exit_code_error: StyleDeclaration {
+                base: pc(10, 10, 10),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let mut p = Palette::default();
@@ -435,9 +450,18 @@ mod tests {
 
     #[test]
     fn role_from_key_known_and_unknown() {
-        assert_eq!(PaletteRole::from_key("thinking"), Some(PaletteRole::Thinking));
-        assert_eq!(PaletteRole::from_key("tab_active_bg"), Some(PaletteRole::TabActiveBg));
-        assert_eq!(PaletteRole::from_key("fullscreen"), Some(PaletteRole::Fullscreen));
+        assert_eq!(
+            PaletteRole::from_key("thinking"),
+            Some(PaletteRole::Thinking)
+        );
+        assert_eq!(
+            PaletteRole::from_key("tab_active_bg"),
+            Some(PaletteRole::TabActiveBg)
+        );
+        assert_eq!(
+            PaletteRole::from_key("fullscreen"),
+            Some(PaletteRole::Fullscreen)
+        );
         assert_eq!(PaletteRole::from_key("nope"), None);
         assert_eq!(PaletteRole::from_key("theme_source"), None);
     }
@@ -500,10 +524,22 @@ mod tests {
                 background: pc(22, 22, 22),
                 ..Default::default()
             },
-            ribbon_selected: StyleDeclaration { background: pc(33, 33, 33), ..Default::default() },
-            ribbon_unselected: StyleDeclaration { background: pc(44, 44, 44), ..Default::default() },
-            exit_code_success: StyleDeclaration { base: pc(55, 55, 55), ..Default::default() },
-            exit_code_error: StyleDeclaration { base: pc(66, 66, 66), ..Default::default() },
+            ribbon_selected: StyleDeclaration {
+                background: pc(33, 33, 33),
+                ..Default::default()
+            },
+            ribbon_unselected: StyleDeclaration {
+                background: pc(44, 44, 44),
+                ..Default::default()
+            },
+            exit_code_success: StyleDeclaration {
+                base: pc(55, 55, 55),
+                ..Default::default()
+            },
+            exit_code_error: StyleDeclaration {
+                base: pc(66, 66, 66),
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -516,7 +552,7 @@ mod tests {
         // Override wins over both the theme and the default.
         assert_eq!(p.thinking, (255, 0, 255));
         assert_eq!(p.tab_active_bg, (0, 128, 0)); // not the theme's (33, 33, 33)
-        // Theme applies where there is no override.
+                                                  // Theme applies where there is no override.
         assert_eq!(p.bar_bg, (22, 22, 22));
         assert_eq!(p.text, (11, 11, 11));
         assert_eq!(p.success, (55, 55, 55));
