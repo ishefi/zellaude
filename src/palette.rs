@@ -7,6 +7,8 @@
 //! layers: built-in defaults, an optional Zellij-theme overlay, then explicit
 //! per-role overrides.
 
+use zellij_tile::prelude::{PaletteColor, Styling};
+
 /// An RGB color, matching the `(r, g, b)` tuples used throughout rendering.
 pub type Color = (u8, u8, u8);
 
@@ -106,6 +108,54 @@ fn parse_hex(hex: &str) -> Option<Color> {
     }
 }
 
+/// Standard xterm base-16 ANSI colors (the terminal's real values aren't
+/// knowable from a plugin, so a conventional table is used).
+const ANSI16: [Color; 16] = [
+    (0, 0, 0),
+    (128, 0, 0),
+    (0, 128, 0),
+    (128, 128, 0),
+    (0, 0, 128),
+    (128, 0, 128),
+    (0, 128, 128),
+    (192, 192, 192),
+    (128, 128, 128),
+    (255, 0, 0),
+    (0, 255, 0),
+    (255, 255, 0),
+    (0, 0, 255),
+    (255, 0, 255),
+    (0, 255, 255),
+    (255, 255, 255),
+];
+
+/// Convert an xterm-256 palette index to RGB.
+fn eightbit_to_rgb(idx: u8) -> Color {
+    match idx {
+        0..=15 => ANSI16[idx as usize],
+        16..=231 => {
+            let i = idx - 16;
+            let r = i / 36;
+            let g = (i % 36) / 6;
+            let b = i % 6;
+            let scale = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
+            (scale(r), scale(g), scale(b))
+        }
+        232..=255 => {
+            let level = 8 + (idx - 232) * 10;
+            (level, level, level)
+        }
+    }
+}
+
+/// Resolve a Zellij `PaletteColor` to RGB.
+fn palette_color_to_rgb(c: PaletteColor) -> Color {
+    match c {
+        PaletteColor::Rgb((r, g, b)) => (r, g, b),
+        PaletteColor::EightBit(idx) => eightbit_to_rgb(idx),
+    }
+}
+
 /// A single overridable color role, identified in config by its snake_case key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteRole {
@@ -192,6 +242,16 @@ impl Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eightbit_cube_and_grayscale() {
+        assert_eq!(eightbit_to_rgb(16), (0, 0, 0));
+        assert_eq!(eightbit_to_rgb(231), (255, 255, 255));
+        assert_eq!(eightbit_to_rgb(196), (255, 0, 0));
+        assert_eq!(eightbit_to_rgb(232), (8, 8, 8));
+        assert_eq!(eightbit_to_rgb(255), (238, 238, 238));
+        assert_eq!(eightbit_to_rgb(9), (255, 0, 0)); // ANSI bright red
+    }
 
     #[test]
     fn parse_hex_long_and_short() {
