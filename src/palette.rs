@@ -166,21 +166,34 @@ pub fn apply_overrides(palette: &mut Palette, overrides: &[(PaletteRole, Color)]
 
 /// Overlay the roles that can be derived from the active Zellij theme.
 ///
-/// Only surfaces, text shades, and the two semantic exit-code colors are
-/// mapped. Decorative status hues are left untouched so red still means
-/// "waiting" and green still means "done" on any theme.
+/// Each themed surface is paired with the foreground meant to sit on it, the
+/// way Zellij's own tab-bar does: the prefix and the active tab use the
+/// `ribbon_selected` (base + background) pair, inactive tabs use the
+/// `ribbon_unselected` pair, and the bar fill / settings text use the
+/// `text_unselected` pair. This keeps every label readable on any theme.
+/// Decorative status hues (thinking, tool, notification, accent_blue, neutral,
+/// flash, fullscreen) are left untouched so the activity legend keeps its
+/// meaning; `success`/`waiting` follow the theme's exit-code colors, which are
+/// themselves green/red.
 pub fn apply_theme(palette: &mut Palette, styling: &Styling) {
-    let text = &styling.text_unselected;
-    palette.bar_bg = palette_color_to_rgb(text.background);
-    palette.text = palette_color_to_rgb(text.base);
-    palette.text_dim = palette_color_to_rgb(text.emphasis_0);
-    palette.text_muted = palette_color_to_rgb(text.emphasis_2);
-    palette.disabled = palette_color_to_rgb(text.emphasis_3);
-    palette.elapsed = palette_color_to_rgb(text.emphasis_2);
-    palette.tab_active_bg = palette_color_to_rgb(styling.ribbon_selected.background);
-    palette.tab_inactive_bg = palette_color_to_rgb(styling.ribbon_unselected.background);
-    palette.prefix_bg = palette_color_to_rgb(styling.ribbon_unselected.background);
+    // Bar fill and the detail text drawn on it (e.g. settings-menu items).
+    palette.bar_bg = palette_color_to_rgb(styling.text_unselected.background);
+    palette.disabled = palette_color_to_rgb(styling.text_unselected.emphasis_3);
+
+    // Prefix + active tab: the "selected ribbon" foreground/background pair.
+    palette.text = palette_color_to_rgb(styling.ribbon_selected.base);
+    palette.prefix_bg = palette_color_to_rgb(styling.ribbon_selected.background);
     palette.prefix_bg_active = palette_color_to_rgb(styling.ribbon_selected.background);
+    palette.tab_active_bg = palette_color_to_rgb(styling.ribbon_selected.background);
+
+    // Inactive tabs: the "unselected ribbon" pair. `elapsed` rides the tab
+    // background too, so it uses the same foreground.
+    palette.text_dim = palette_color_to_rgb(styling.ribbon_unselected.base);
+    palette.text_muted = palette_color_to_rgb(styling.ribbon_unselected.base);
+    palette.elapsed = palette_color_to_rgb(styling.ribbon_unselected.base);
+    palette.tab_inactive_bg = palette_color_to_rgb(styling.ribbon_unselected.background);
+
+    // Semantic exit-code colors (green = done, red = waiting).
     palette.success = palette_color_to_rgb(styling.exit_code_success.base);
     palette.waiting = palette_color_to_rgb(styling.exit_code_error.base);
 }
@@ -361,21 +374,23 @@ mod tests {
     }
 
     #[test]
-    fn theme_maps_surfaces_text_and_exit_codes_only() {
+    fn theme_pairs_ribbon_fg_with_its_own_bg() {
+        // Distinct base vs background per declaration so a fg/bg mismatch would
+        // surface as a wrong assertion.
         let styling = Styling {
             text_unselected: StyleDeclaration {
                 base: pc(1, 1, 1),
                 background: pc(2, 2, 2),
-                emphasis_0: pc(3, 3, 3),
-                emphasis_1: pc(4, 4, 4),
-                emphasis_2: pc(5, 5, 5),
                 emphasis_3: pc(6, 6, 6),
+                ..Default::default()
             },
             ribbon_selected: StyleDeclaration {
+                base: pc(70, 70, 70),
                 background: pc(7, 7, 7),
                 ..Default::default()
             },
             ribbon_unselected: StyleDeclaration {
+                base: pc(80, 80, 80),
                 background: pc(8, 8, 8),
                 ..Default::default()
             },
@@ -392,16 +407,20 @@ mod tests {
         let mut p = Palette::default();
         apply_theme(&mut p, &styling);
 
+        // Bar fill + settings text from the text_unselected pair.
         assert_eq!(p.bar_bg, (2, 2, 2));
-        assert_eq!(p.text, (1, 1, 1));
-        assert_eq!(p.text_dim, (3, 3, 3));
-        assert_eq!(p.text_muted, (5, 5, 5));
         assert_eq!(p.disabled, (6, 6, 6));
-        assert_eq!(p.elapsed, (5, 5, 5));
-        assert_eq!(p.tab_active_bg, (7, 7, 7));
-        assert_eq!(p.tab_inactive_bg, (8, 8, 8));
-        assert_eq!(p.prefix_bg, (8, 8, 8));
+        // Prefix + active tab use the selected-ribbon pair (base on background).
+        assert_eq!(p.text, (70, 70, 70));
+        assert_eq!(p.prefix_bg, (7, 7, 7));
         assert_eq!(p.prefix_bg_active, (7, 7, 7));
+        assert_eq!(p.tab_active_bg, (7, 7, 7));
+        // Inactive tabs use the unselected-ribbon pair.
+        assert_eq!(p.text_dim, (80, 80, 80));
+        assert_eq!(p.text_muted, (80, 80, 80));
+        assert_eq!(p.elapsed, (80, 80, 80));
+        assert_eq!(p.tab_inactive_bg, (8, 8, 8));
+        // Semantic exit-code colors.
         assert_eq!(p.success, (9, 9, 9));
         assert_eq!(p.waiting, (10, 10, 10));
 
@@ -525,6 +544,7 @@ mod tests {
                 ..Default::default()
             },
             ribbon_selected: StyleDeclaration {
+                base: pc(111, 111, 111),
                 background: pc(33, 33, 33),
                 ..Default::default()
             },
@@ -554,7 +574,7 @@ mod tests {
         assert_eq!(p.tab_active_bg, (0, 128, 0)); // not the theme's (33, 33, 33)
                                                   // Theme applies where there is no override.
         assert_eq!(p.bar_bg, (22, 22, 22));
-        assert_eq!(p.text, (11, 11, 11));
+        assert_eq!(p.text, (111, 111, 111)); // ribbon_selected.base
         assert_eq!(p.success, (55, 55, 55));
         assert_eq!(p.waiting, (66, 66, 66));
         // A status hue the theme never touches, with no override, keeps its default.
