@@ -481,4 +481,47 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn end_to_end_resolution_override_beats_theme_beats_default() {
+        // Mirrors State::recompute_palette: parse config, then resolve the
+        // three layers (default -> theme -> overrides) and confirm precedence.
+        let mut config = BTreeMap::new();
+        config.insert("theme_source".to_string(), "zellij".to_string());
+        config.insert("thinking".to_string(), "#ff00ff".to_string());
+        config.insert("tab_active_bg".to_string(), "0,128,0".to_string());
+
+        let (source, overrides) = parse_config(&config);
+        assert_eq!(source, ThemeSource::Zellij);
+
+        let styling = Styling {
+            text_unselected: StyleDeclaration {
+                base: pc(11, 11, 11),
+                background: pc(22, 22, 22),
+                ..Default::default()
+            },
+            ribbon_selected: StyleDeclaration { background: pc(33, 33, 33), ..Default::default() },
+            ribbon_unselected: StyleDeclaration { background: pc(44, 44, 44), ..Default::default() },
+            exit_code_success: StyleDeclaration { base: pc(55, 55, 55), ..Default::default() },
+            exit_code_error: StyleDeclaration { base: pc(66, 66, 66), ..Default::default() },
+            ..Default::default()
+        };
+
+        let mut p = Palette::default();
+        if source == ThemeSource::Zellij {
+            apply_theme(&mut p, &styling);
+        }
+        apply_overrides(&mut p, &overrides);
+
+        // Override wins over both the theme and the default.
+        assert_eq!(p.thinking, (255, 0, 255));
+        assert_eq!(p.tab_active_bg, (0, 128, 0)); // not the theme's (33, 33, 33)
+        // Theme applies where there is no override.
+        assert_eq!(p.bar_bg, (22, 22, 22));
+        assert_eq!(p.text, (11, 11, 11));
+        assert_eq!(p.success, (55, 55, 55));
+        assert_eq!(p.waiting, (66, 66, 66));
+        // A status hue the theme never touches, with no override, keeps its default.
+        assert_eq!(p.tool, Palette::default().tool);
+    }
 }
