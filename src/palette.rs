@@ -71,9 +71,33 @@ mod tests {
 
     #[test]
     fn default_palette_matches_original_values() {
-        let p = Palette::default();
-        assert_eq!(p.thinking, (180, 140, 255));
-        assert_eq!(p.bar_bg, (30, 30, 46));
-        assert_eq!(p.fullscreen, (255, 200, 60));
+        // Exhaustive struct-literal compare: a typo in any default, or a new
+        // field added without a default, fails this test (or fails to compile).
+        // These values must reproduce Zellaude's original hardcoded palette.
+        assert_eq!(
+            Palette::default(),
+            Palette {
+                thinking: (180, 140, 255),
+                tool: (255, 170, 50),
+                waiting: (255, 60, 60),
+                success: (80, 200, 120),
+                notification: (200, 200, 100),
+                accent_blue: (80, 180, 255),
+                neutral: (180, 175, 195),
+                bar_bg: (30, 30, 46),
+                prefix_bg: (60, 50, 80),
+                prefix_bg_active: (100, 70, 140),
+                tab_active_bg: (140, 100, 200),
+                tab_inactive_bg: (80, 75, 110),
+                flash_bg: (80, 80, 30),
+                text: (255, 255, 255),
+                text_dim: (120, 220, 220),
+                text_muted: (170, 165, 185),
+                disabled: (100, 100, 100),
+                elapsed: (165, 160, 180),
+                flash_text: (255, 255, 80),
+                fullscreen: (255, 200, 60),
+            }
+        );
     }
 }
