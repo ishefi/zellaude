@@ -4,7 +4,12 @@
 layout {
     default_tab_template {
         pane size=1 borderless=true {
-            plugin location="file:~/.config/zellij/plugins/zellaude.wasm"
+            plugin location="file:~/.config/zellij/plugins/zellaude.wasm" {
+                // Optional theming — see the README "Theming" section.
+                // theme_source "zellij"
+                // thinking "#b48cff"
+                // tab_active_bg "140,100,200"
+            }
         }
         children
     }

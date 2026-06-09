@@ -43,6 +43,58 @@ Click the **Zellaude** prefix on the left side of the bar to open the settings m
 | Flash | Persist / Brief / Off | Brief | Yellow flash on permission requests. "Persist" keeps flashing until resolved, "Brief" flashes for 2 seconds. |
 | Elapsed time | On / Off | On | Show time since last activity (appears after 30s). |
 
+### Theming
+
+Zellaude ships with the default palette shown above. You can override any color,
+or have the bar follow your active Zellij theme, by adding configuration to the
+plugin block in your layout:
+
+```kdl
+plugin location="file:~/.config/zellij/plugins/zellaude.wasm" {
+    // Optional: derive surfaces/text from the active Zellij theme.
+    // "builtin" (default) keeps Zellaude's own colors.
+    theme_source "zellij"
+
+    // Override individual roles. Values are hex (#rrggbb or #rgb) or
+    // r,g,b / r g b triplets.
+    thinking      "#b48cff"
+    tab_active_bg "140,100,200"
+}
+```
+
+Resolution order, lowest to highest precedence: built-in defaults → Zellij theme
+(only when `theme_source "zellij"`) → explicit overrides. Unknown keys are
+ignored; an invalid color keeps that role's default.
+
+When `theme_source "zellij"` is set, surfaces and text follow the theme while the
+semantic status hues (e.g. red = waiting, green = done) keep their meaning unless
+you override them.
+
+Overridable roles:
+
+| Role | Default | Drives |
+|------|---------|--------|
+| `thinking` | `#b48cff` | Thinking glyph · Tab/Session mode pill |
+| `tool` | `#ffaa32` | Tool glyphs · Resize/Move mode pill |
+| `waiting` | `#ff3c3c` | Waiting glyph · Locked mode pill · menu close |
+| `success` | `#50c878` | Prompting/Done glyphs · Normal/Prompt/Tmux pill · menu "on" |
+| `notification` | `#c8c864` | Notification glyph · Scroll/Search/Rename pill |
+| `accent_blue` | `#50b4ff` | Pane mode pill |
+| `neutral` | `#b4afc3` | Init / Idle glyphs |
+| `bar_bg` | `#1e1e2e` | Bar background · dark mode-pill text |
+| `prefix_bg` | `#3c3250` | "Zellaude" prefix |
+| `prefix_bg_active` | `#64468c` | Prefix while the settings menu is open |
+| `tab_active_bg` | `#8c64c8` | Active tab background |
+| `tab_inactive_bg` | `#504b6e` | Inactive tab background |
+| `flash_bg` | `#50501e` | Tab background during a permission flash |
+| `text` | `#ffffff` | Prefix label · active tab names |
+| `text_dim` | `#78dcdc` | Inactive Claude tab name |
+| `text_muted` | `#aaa5b9` | Inactive non-Claude tab name |
+| `disabled` | `#646464` | Settings-menu "off" items |
+| `elapsed` | `#a5a0b4` | Elapsed-time suffix |
+| `flash_text` | `#ffff50` | Tab text during a flash |
+| `fullscreen` | `#ffc83c` | Fullscreen `F` · menu amber accents |
+
 ## Install
 
 ### Prerequisites
