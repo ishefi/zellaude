@@ -156,6 +156,34 @@ fn palette_color_to_rgb(c: PaletteColor) -> Color {
     }
 }
 
+/// Apply per-role overrides on top of an existing palette.
+pub fn apply_overrides(palette: &mut Palette, overrides: &[(PaletteRole, Color)]) {
+    for &(role, color) in overrides {
+        palette.set(role, color);
+    }
+}
+
+/// Overlay the roles that can be derived from the active Zellij theme.
+///
+/// Only surfaces, text shades, and the two semantic exit-code colors are
+/// mapped. Decorative status hues are left untouched so red still means
+/// "waiting" and green still means "done" on any theme.
+pub fn apply_theme(palette: &mut Palette, styling: &Styling) {
+    let text = &styling.text_unselected;
+    palette.bar_bg = palette_color_to_rgb(text.background);
+    palette.text = palette_color_to_rgb(text.base);
+    palette.text_dim = palette_color_to_rgb(text.emphasis_0);
+    palette.text_muted = palette_color_to_rgb(text.emphasis_2);
+    palette.disabled = palette_color_to_rgb(text.emphasis_3);
+    palette.elapsed = palette_color_to_rgb(text.emphasis_2);
+    palette.tab_active_bg = palette_color_to_rgb(styling.ribbon_selected.background);
+    palette.tab_inactive_bg = palette_color_to_rgb(styling.ribbon_unselected.background);
+    palette.prefix_bg = palette_color_to_rgb(styling.ribbon_unselected.background);
+    palette.prefix_bg_active = palette_color_to_rgb(styling.ribbon_selected.background);
+    palette.success = palette_color_to_rgb(styling.exit_code_success.base);
+    palette.waiting = palette_color_to_rgb(styling.exit_code_error.base);
+}
+
 /// A single overridable color role, identified in config by its snake_case key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteRole {
@@ -242,6 +270,62 @@ impl Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zellij_tile::prelude::{PaletteColor, StyleDeclaration, Styling};
+
+    fn pc(r: u8, g: u8, b: u8) -> PaletteColor {
+        PaletteColor::Rgb((r, g, b))
+    }
+
+    #[test]
+    fn overrides_apply_in_order() {
+        let mut p = Palette::default();
+        apply_overrides(
+            &mut p,
+            &[(PaletteRole::Thinking, (1, 2, 3)), (PaletteRole::BarBg, (4, 5, 6))],
+        );
+        assert_eq!(p.thinking, (1, 2, 3));
+        assert_eq!(p.bar_bg, (4, 5, 6));
+        assert_eq!(p.tool, Palette::default().tool);
+    }
+
+    #[test]
+    fn theme_maps_surfaces_text_and_exit_codes_only() {
+        let styling = Styling {
+            text_unselected: StyleDeclaration {
+                base: pc(1, 1, 1),
+                background: pc(2, 2, 2),
+                emphasis_0: pc(3, 3, 3),
+                emphasis_1: pc(4, 4, 4),
+                emphasis_2: pc(5, 5, 5),
+                emphasis_3: pc(6, 6, 6),
+            },
+            ribbon_selected: StyleDeclaration { background: pc(7, 7, 7), ..Default::default() },
+            ribbon_unselected: StyleDeclaration { background: pc(8, 8, 8), ..Default::default() },
+            exit_code_success: StyleDeclaration { base: pc(9, 9, 9), ..Default::default() },
+            exit_code_error: StyleDeclaration { base: pc(10, 10, 10), ..Default::default() },
+            ..Default::default()
+        };
+        let mut p = Palette::default();
+        apply_theme(&mut p, &styling);
+
+        assert_eq!(p.bar_bg, (2, 2, 2));
+        assert_eq!(p.text, (1, 1, 1));
+        assert_eq!(p.text_dim, (3, 3, 3));
+        assert_eq!(p.text_muted, (5, 5, 5));
+        assert_eq!(p.disabled, (6, 6, 6));
+        assert_eq!(p.elapsed, (5, 5, 5));
+        assert_eq!(p.tab_active_bg, (7, 7, 7));
+        assert_eq!(p.tab_inactive_bg, (8, 8, 8));
+        assert_eq!(p.prefix_bg, (8, 8, 8));
+        assert_eq!(p.prefix_bg_active, (7, 7, 7));
+        assert_eq!(p.success, (9, 9, 9));
+        assert_eq!(p.waiting, (10, 10, 10));
+
+        // Decorative status hues are untouched by the theme.
+        assert_eq!(p.thinking, Palette::default().thinking);
+        assert_eq!(p.tool, Palette::default().tool);
+        assert_eq!(p.accent_blue, Palette::default().accent_blue);
+    }
 
     #[test]
     fn eightbit_cube_and_grayscale() {
