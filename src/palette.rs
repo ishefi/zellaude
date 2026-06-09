@@ -7,6 +7,7 @@
 //! layers: built-in defaults, an optional Zellij-theme overlay, then explicit
 //! per-role overrides.
 
+use std::collections::BTreeMap;
 use zellij_tile::prelude::{PaletteColor, Styling};
 
 /// An RGB color, matching the `(r, g, b)` tuples used throughout rendering.
@@ -267,10 +268,78 @@ impl Palette {
     }
 }
 
+/// Where the base palette comes from before overrides are applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThemeSource {
+    /// Zellaude's built-in default colors.
+    #[default]
+    Builtin,
+    /// Derive surfaces/text/exit-code colors from the active Zellij theme.
+    Zellij,
+}
+
+/// Parse the plugin's KDL configuration into a theme source and a list of
+/// per-role color overrides.
+///
+/// Unknown keys are ignored (Zellij passes the entire `plugin {}` block).
+/// Known roles with an unparseable color are skipped with a diagnostic so the
+/// bar always renders.
+pub fn parse_config(config: &BTreeMap<String, String>) -> (ThemeSource, Vec<(PaletteRole, Color)>) {
+    let mut theme_source = ThemeSource::Builtin;
+    let mut overrides = Vec::new();
+
+    for (key, value) in config {
+        if key == "theme_source" {
+            theme_source = match value.trim() {
+                "zellij" => ThemeSource::Zellij,
+                "builtin" => ThemeSource::Builtin,
+                other => {
+                    eprintln!("zellaude: unknown theme_source {other:?}, using \"builtin\"");
+                    ThemeSource::Builtin
+                }
+            };
+            continue;
+        }
+        if let Some(role) = PaletteRole::from_key(key) {
+            match parse_color(value) {
+                Some(color) => overrides.push((role, color)),
+                None => eprintln!(
+                    "zellaude: invalid color for {key:?}: {value:?} (keeping default)"
+                ),
+            }
+        }
+    }
+
+    (theme_source, overrides)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use zellij_tile::prelude::{PaletteColor, StyleDeclaration, Styling};
+
+    #[test]
+    fn parse_config_reads_theme_overrides_and_ignores_unknown() {
+        let mut config = BTreeMap::new();
+        config.insert("theme_source".to_string(), "zellij".to_string());
+        config.insert("thinking".to_string(), "#010203".to_string());
+        config.insert("waiting".to_string(), "bad-color".to_string()); // skipped
+        config.insert("not_a_role".to_string(), "whatever".to_string()); // ignored
+
+        let (source, overrides) = parse_config(&config);
+        assert_eq!(source, ThemeSource::Zellij);
+        assert!(overrides.contains(&(PaletteRole::Thinking, (1, 2, 3))));
+        assert!(!overrides.iter().any(|(r, _)| *r == PaletteRole::Waiting));
+        assert_eq!(overrides.len(), 1);
+    }
+
+    #[test]
+    fn parse_config_defaults_to_builtin_theme() {
+        let (source, overrides) = parse_config(&BTreeMap::new());
+        assert_eq!(source, ThemeSource::Builtin);
+        assert!(overrides.is_empty());
+    }
 
     fn pc(r: u8, g: u8, b: u8) -> PaletteColor {
         PaletteColor::Rgb((r, g, b))
