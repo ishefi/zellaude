@@ -65,6 +65,47 @@ impl Default for Palette {
     }
 }
 
+/// Parse a color string. Accepts `#rrggbb`, `#rgb` (shorthand), and `r,g,b` or
+/// `r g b` triplets (components `0..=255`). Returns `None` on any other input.
+pub fn parse_color(s: &str) -> Option<Color> {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix('#') {
+        return parse_hex(hex);
+    }
+    let parts: Vec<&str> = if s.contains(',') {
+        s.split(',').collect()
+    } else {
+        s.split_whitespace().collect()
+    };
+    if parts.len() != 3 {
+        return None;
+    }
+    let r = parts[0].trim().parse::<u8>().ok()?;
+    let g = parts[1].trim().parse::<u8>().ok()?;
+    let b = parts[2].trim().parse::<u8>().ok()?;
+    Some((r, g, b))
+}
+
+fn parse_hex(hex: &str) -> Option<Color> {
+    match hex.len() {
+        6 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            Some((r, g, b))
+        }
+        3 => {
+            // Expand each nibble: "f" -> 0xff, "a" -> 0xaa.
+            let expand = |c: &str| u8::from_str_radix(c, 16).map(|v| v * 17).ok();
+            let r = expand(&hex[0..1])?;
+            let g = expand(&hex[1..2])?;
+            let b = expand(&hex[2..3])?;
+            Some((r, g, b))
+        }
+        _ => None,
+    }
+}
+
 /// A single overridable color role, identified in config by its snake_case key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteRole {
@@ -151,6 +192,33 @@ impl Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_hex_long_and_short() {
+        assert_eq!(parse_color("#b48cff"), Some((180, 140, 255)));
+        assert_eq!(parse_color("#B48CFF"), Some((180, 140, 255)));
+        assert_eq!(parse_color("#fff"), Some((255, 255, 255)));
+        assert_eq!(parse_color("#0a0"), Some((0, 170, 0)));
+    }
+
+    #[test]
+    fn parse_triplet_comma_and_space() {
+        assert_eq!(parse_color("180,140,255"), Some((180, 140, 255)));
+        assert_eq!(parse_color("180, 140, 255"), Some((180, 140, 255)));
+        assert_eq!(parse_color("80 180 255"), Some((80, 180, 255)));
+        assert_eq!(parse_color("  255,60,60  "), Some((255, 60, 60)));
+    }
+
+    #[test]
+    fn parse_color_rejects_invalid() {
+        assert_eq!(parse_color("#12"), None);
+        assert_eq!(parse_color("#zzzzzz"), None);
+        assert_eq!(parse_color("256,0,0"), None);
+        assert_eq!(parse_color("1,2"), None);
+        assert_eq!(parse_color("1,2,3,4"), None);
+        assert_eq!(parse_color("b48cff"), None); // hex requires '#'
+        assert_eq!(parse_color("garbage"), None);
+    }
 
     #[test]
     fn role_from_key_known_and_unknown() {
