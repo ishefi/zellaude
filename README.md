@@ -42,6 +42,8 @@ Click the **Zellaude** prefix on the left side of the bar to open the settings m
 | Notifications | Always / Unfocused / Off | Always | Desktop notifications on permission requests. "Unfocused" only notifies when the requesting pane is on a different tab. |
 | Flash | Persist / Brief / Off | Brief | Yellow flash on permission requests. "Persist" keeps flashing until resolved, "Brief" flashes for 2 seconds. |
 | Elapsed time | On / Off | On | Show time since last activity (appears after 30s). |
+| Mode indicator | On / Off | On | Show the current Zellij input mode pill in the prefix. |
+| Tab titles | On / Off | Off | Name each Claude tab after its pane's title (the OSC title the program in that pane sets). Zellaude only mirrors the pane title onto the tab; supply a meaningful title yourself, e.g. a Claude Code hook that emits an OSC title from the prompt. |
 
 ## Install
 

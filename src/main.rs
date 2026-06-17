@@ -5,12 +5,25 @@ mod state;
 mod tab_pane_map;
 
 use state::{unix_now, unix_now_ms, HookPayload, MenuAction, SessionInfo, Settings, State, ViewMode};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use zellij_tile::prelude::*;
 
 const DONE_TIMEOUT: u64 = 30;
 const TIMER_INTERVAL: f64 = 1.0;
 const FLASH_TICK: f64 = 0.25;
+const MAX_TAB_TITLE: usize = 40;
+
+/// Strip control characters and clamp length before using a pane title as a tab
+/// name. The status bar truncates further for display; this just bounds it.
+fn sanitize_tab_title(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| !c.is_control())
+        .collect::<String>()
+        .trim()
+        .chars()
+        .take(MAX_TAB_TITLE)
+        .collect()
+}
 
 register_plugin!(State);
 
@@ -95,38 +108,43 @@ impl ZellijPlugin for State {
                         false
                     }
                     ViewMode::Settings => {
-                        for region in &self.menu_click_regions {
-                            if col >= region.start_col && col < region.end_col {
-                                match &region.action {
-                                    MenuAction::ToggleSetting(key) => {
-                                        match key {
-                                            state::SettingKey::Notifications => {
-                                                self.settings.notifications =
-                                                    self.settings.notifications.cycle();
-                                            }
-                                            state::SettingKey::Flash => {
-                                                self.settings.flash =
-                                                    self.settings.flash.cycle();
-                                            }
-                                            state::SettingKey::ElapsedTime => {
-                                                self.settings.elapsed_time =
-                                                    !self.settings.elapsed_time;
-                                            }
-                                            state::SettingKey::ModeIndicator => {
-                                                self.settings.mode_indicator =
-                                                    !self.settings.mode_indicator;
-                                            }
-                                        }
-                                        self.save_config();
+                        let action = self
+                            .menu_click_regions
+                            .iter()
+                            .find(|r| col >= r.start_col && col < r.end_col)
+                            .map(|r| r.action);
+                        match action {
+                            Some(MenuAction::ToggleSetting(key)) => {
+                                match key {
+                                    state::SettingKey::Notifications => {
+                                        self.settings.notifications =
+                                            self.settings.notifications.cycle();
                                     }
-                                    MenuAction::CloseMenu => {
-                                        self.view_mode = ViewMode::Normal;
+                                    state::SettingKey::Flash => {
+                                        self.settings.flash = self.settings.flash.cycle();
+                                    }
+                                    state::SettingKey::ElapsedTime => {
+                                        self.settings.elapsed_time = !self.settings.elapsed_time;
+                                    }
+                                    state::SettingKey::ModeIndicator => {
+                                        self.settings.mode_indicator = !self.settings.mode_indicator;
+                                    }
+                                    state::SettingKey::TabTitles => {
+                                        self.settings.tab_titles = !self.settings.tab_titles;
                                     }
                                 }
-                                return true;
+                                self.save_config();
+                                // Apply immediately so the toggle takes effect without
+                                // waiting for the next pane/tab update (no-op when off).
+                                self.apply_tab_titles();
+                                true
                             }
+                            Some(MenuAction::CloseMenu) => {
+                                self.view_mode = ViewMode::Normal;
+                                true
+                            }
+                            None => false,
                         }
-                        false
                     }
                 }
             }
@@ -245,6 +263,51 @@ impl State {
             self.pane_to_tab = tab_pane_map::build_pane_to_tab_map(&self.tabs, manifest);
             self.refresh_session_tab_names();
             self.remove_dead_panes();
+            self.apply_tab_titles();
+        }
+    }
+
+    /// When enabled, name each Claude tab after its pane's title (the OSC title
+    /// the program set). Unopinionated: the label content is whatever set the
+    /// pane title; zellaude only mirrors it onto the tab. Renames only when the
+    /// desired name differs from the current tab name, so it converges after the
+    /// resulting TabUpdate and never loops.
+    fn apply_tab_titles(&mut self) {
+        if !self.settings.tab_titles {
+            return;
+        }
+        let titles = match self.pane_manifest {
+            Some(ref manifest) => tab_pane_map::build_pane_titles(manifest),
+            None => return,
+        };
+
+        // Pick the most recently active Claude session per tab as the title source.
+        let mut best: HashMap<usize, &SessionInfo> = HashMap::new();
+        for session in self.sessions.values() {
+            if let Some(idx) = session.tab_index {
+                let replace = best
+                    .get(&idx)
+                    .map_or(true, |cur| session.last_event_ts >= cur.last_event_ts);
+                if replace {
+                    best.insert(idx, session);
+                }
+            }
+        }
+
+        let mut renames: Vec<(u32, String)> = Vec::new();
+        for tab in &self.tabs {
+            if let Some(session) = best.get(&tab.position) {
+                if let Some(title) = titles.get(&session.pane_id) {
+                    let desired = sanitize_tab_title(title);
+                    if !desired.is_empty() && desired != tab.name {
+                        renames.push((tab.position as u32 + 1, desired));
+                    }
+                }
+            }
+        }
+
+        for (tab_position, name) in renames {
+            rename_tab(tab_position, name);
         }
     }
 
