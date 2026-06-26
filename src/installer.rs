@@ -17,7 +17,7 @@ fn hook_script_content() -> String {
 
 const INSTALL_TEMPLATE: &str = r##"set -e
 HOOK_PATH="$HOME/.config/zellij/plugins/zellaude-hook.sh"
-SETTINGS="$HOME/.claude/settings.json"
+SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 
 # Check if already current
 if grep -qF '__VERSION_TAG__' "$HOOK_PATH" 2>/dev/null; then
@@ -41,7 +41,7 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 if [ ! -f "$SETTINGS" ]; then
-  mkdir -p "$HOME/.claude"
+  mkdir -p "$(dirname "$SETTINGS")"
   echo '{}' > "$SETTINGS"
 fi
 

@@ -114,7 +114,7 @@ Without it, notifications still appear via osascript but clicking them won't foc
 
 Two components:
 
-1. **WASM plugin** — runs inside Zellij, receives events, maintains state in memory, renders the status bar, sends desktop notifications. On first load, writes the hook script to `~/.config/zellij/plugins/zellaude-hook.sh` and registers it in `~/.claude/settings.json`.
+1. **WASM plugin** — runs inside Zellij, receives events, maintains state in memory, renders the status bar, sends desktop notifications. On first load, writes the hook script to `~/.config/zellij/plugins/zellaude-hook.sh` and registers it in `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`.
 2. **Hook script** — a thin bash bridge that forwards Claude Code hook events to the plugin via `zellij pipe`
 
 ```
