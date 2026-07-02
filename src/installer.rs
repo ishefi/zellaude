@@ -17,11 +17,31 @@ fn hook_script_content() -> String {
 
 const INSTALL_TEMPLATE: &str = r##"set -e
 HOOK_PATH="$HOME/.config/zellij/plugins/zellaude-hook.sh"
+HOOK_CMD='${HOME}/.config/zellij/plugins/zellaude-hook.sh'
 SETTINGS="$HOME/.claude/settings.json"
+
+resolve_file_symlink() {
+  path=$1
+  while [ -L "$path" ]; do
+    dir=$(cd "$(dirname "$path")" && pwd -P)
+    target=$(readlink "$path")
+    case "$target" in
+      /*) path=$target ;;
+      *) path=$dir/$target ;;
+    esac
+  done
+  dir=$(cd "$(dirname "$path")" && pwd -P)
+  printf '%s/%s\n' "$dir" "$(basename "$path")"
+}
+
+# Resolve symlink so mv doesn't replace the link with a regular file
+if [ -L "$SETTINGS" ]; then
+  SETTINGS="$(resolve_file_symlink "$SETTINGS")"
+fi
 
 # Check if already current
 if grep -qF '__VERSION_TAG__' "$HOOK_PATH" 2>/dev/null; then
-  if [ -f "$SETTINGS" ] && grep -qF "$HOOK_PATH" "$SETTINGS" 2>/dev/null; then
+  if [ -f "$SETTINGS" ] && grep -qF "$HOOK_CMD" "$SETTINGS" 2>/dev/null; then
     echo "current"
     exit 0
   fi
@@ -64,9 +84,9 @@ jq '
   else . end
 ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
 
-# Add new hook entries
+# Add new hook entries with literal ${HOME} to keep settings portable
 EVENTS='["PreToolUse","PostToolUse","PostToolUseFailure","UserPromptSubmit","PermissionRequest","Notification","Stop","SubagentStop","SessionStart","SessionEnd"]'
-ENTRY=$(jq -nc --arg cmd "$HOOK_PATH" '[{"hooks": [{"type": "command", "command": $cmd, "timeout": 5, "async": true}]}]')
+ENTRY=$(jq -nc --arg cmd "$HOOK_CMD" '[{"hooks": [{"type": "command", "command": $cmd, "timeout": 5, "async": true}]}]')
 tmp=$(mktemp)
 jq --argjson events "$EVENTS" --argjson entry "$ENTRY" '
   .hooks //= {} |
