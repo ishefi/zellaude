@@ -14,6 +14,7 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
     // SessionEnd → remove session (never drop: terminal cleanup)
     if event == "SessionEnd" {
         state.sessions.remove(&payload.pane_id);
+        state.state_dirty = true;
         return;
     }
 
@@ -30,9 +31,7 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
 
     let activity = match event {
         "SessionStart" => Activity::Init,
-        "PreToolUse" => {
-            Activity::Tool(payload.tool_name.clone().unwrap_or_default())
-        }
+        "PreToolUse" => Activity::Tool(payload.tool_name.clone().unwrap_or_default()),
         "PostToolUse" | "PostToolUseFailure" => Activity::Thinking,
         "UserPromptSubmit" => Activity::Thinking,
         "PermissionRequest" => Activity::Waiting,
@@ -43,19 +42,26 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
                 if let Some(ts_ms) = payload.ts_ms {
                     session.last_ts_ms = ts_ms;
                 }
+                state.state_dirty = true;
             }
             return;
         }
         "Stop" => Activity::Done,
         "SubagentStop" => Activity::AgentDone,
-        _ => Activity::Idle,
+        // Unknown event — leave existing state alone. Falling through to
+        // Idle would silently clobber legitimate states (e.g. Waiting→Idle
+        // when an unrecognized hook like PreCompact fires during a permission
+        // prompt), making the bar lie about what the session is doing.
+        _ => {
+            state.log(
+                crate::state::LogLevel::Debug,
+                &format!("handle_hook_event: ignoring unknown event {event:?}"),
+            );
+            return;
+        }
     };
 
-    let (tab_index, tab_name) = state
-        .pane_to_tab
-        .get(&payload.pane_id)
-        .cloned()
-        .unzip();
+    let (tab_index, tab_name) = state.pane_to_tab.get(&payload.pane_id).cloned().unzip();
 
     let session = state
         .sessions
@@ -90,6 +96,11 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
         state.flash_deadlines.remove(&payload.pane_id);
     }
 
+    let entered_waiting =
+        matches!(activity, Activity::Waiting) && !matches!(session.activity, Activity::Waiting);
+    let entered_done = matches!(activity, Activity::Done | Activity::AgentDone)
+        && !matches!(session.activity, Activity::Done | Activity::AgentDone);
+
     session.activity = activity;
     session.last_event_ts = crate::state::unix_now();
     if let Some(ts_ms) = payload.ts_ms {
@@ -104,5 +115,10 @@ pub fn handle_hook_event(state: &mut State, payload: HookPayload) {
     if let Some((idx, name)) = tab_index.zip(tab_name) {
         session.tab_index = Some(idx);
         session.tab_name = Some(name);
+    }
+    state.state_dirty = true;
+
+    if entered_waiting || entered_done {
+        state.beep_pending.insert(payload.pane_id);
     }
 }

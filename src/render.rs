@@ -1,6 +1,7 @@
 use crate::state::{
-    unix_now, unix_now_ms, Activity, ClickRegion, FlashMode, MenuAction, MenuClickRegion,
-    NotifyMode, SessionInfo, SettingKey, State, ViewMode,
+    unix_now, unix_now_ms, Activity, BeepMode, ClickRegion, FlashMode, LogLevel, MenuAction,
+    MenuClickRegion, NotifyMode, RemoteTagClickRegion, RemoteTagKind, SessionInfo, SettingKey,
+    State, ViewMode,
 };
 use std::fmt::Write;
 use std::io::Write as IoWrite;
@@ -29,8 +30,18 @@ fn activity_priority(activity: &Activity) -> u8 {
 
 fn activity_style(activity: &Activity) -> Style {
     match activity {
-        Activity::Init => Style { symbol: "◆", r: 180, g: 175, b: 195 },
-        Activity::Thinking => Style { symbol: "●", r: 180, g: 140, b: 255 },
+        Activity::Init => Style {
+            symbol: "◆",
+            r: 180,
+            g: 175,
+            b: 195,
+        },
+        Activity::Thinking => Style {
+            symbol: "●",
+            r: 180,
+            g: 140,
+            b: 255,
+        },
         Activity::Tool(name) => {
             let symbol = match name.as_str() {
                 "Bash" => "⚡",
@@ -40,14 +51,49 @@ fn activity_style(activity: &Activity) -> Style {
                 "WebSearch" | "WebFetch" => "◈",
                 _ => "⚙",
             };
-            Style { symbol, r: 255, g: 170, b: 50 }
+            Style {
+                symbol,
+                r: 255,
+                g: 170,
+                b: 50,
+            }
         }
-        Activity::Prompting => Style { symbol: "▶", r: 80, g: 200, b: 120 },
-        Activity::Waiting => Style { symbol: "⚠", r: 255, g: 60, b: 60 },
-        Activity::Notification => Style { symbol: "◇", r: 200, g: 200, b: 100 },
-        Activity::Done => Style { symbol: "✓", r: 80, g: 200, b: 120 },
-        Activity::AgentDone => Style { symbol: "✓", r: 80, g: 180, b: 100 },
-        Activity::Idle => Style { symbol: "○", r: 180, g: 175, b: 195 },
+        Activity::Prompting => Style {
+            symbol: "▶",
+            r: 80,
+            g: 200,
+            b: 120,
+        },
+        Activity::Waiting => Style {
+            symbol: "⚠",
+            r: 255,
+            g: 60,
+            b: 60,
+        },
+        Activity::Notification => Style {
+            symbol: "◇",
+            r: 200,
+            g: 200,
+            b: 100,
+        },
+        Activity::Done => Style {
+            symbol: "✓",
+            r: 80,
+            g: 200,
+            b: 120,
+        },
+        Activity::AgentDone => Style {
+            symbol: "✓",
+            r: 80,
+            g: 180,
+            b: 100,
+        },
+        Activity::Idle => Style {
+            symbol: "○",
+            r: 180,
+            g: 175,
+            b: 195,
+        },
     }
 }
 
@@ -119,8 +165,62 @@ fn mode_style(mode: InputMode) -> (Color, &'static str) {
 pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     state.click_regions.clear();
     state.menu_click_regions.clear();
+    state.remote_tag_click_regions.clear();
 
     let mut buf = String::with_capacity(cols * 4);
+    // Pending notification beeps. Every plugin instance queues its own beep
+    // when a hook arrives, but only the instance whose tab is active should
+    // actually emit — otherwise a queued beep would fire later when the user
+    // switches to that tab, long after the event. Always drain the set so
+    // entries don't accumulate across renders.
+    let local_beep_candidate = !state.beep_pending.is_empty();
+    let local_beep = state.settings.beep.beeps_local()
+        && state.beep_pending.iter().any(|pane_id| {
+            state
+                .pane_to_tab
+                .get(pane_id)
+                .is_some_and(|(tab_idx, _)| Some(*tab_idx) == state.active_tab_index)
+        });
+    let local_pending_count = state.beep_pending.len();
+    state.beep_pending.clear();
+    // Cross-session beep: fires when reconcile_remote_tags actually enqueued
+    // a new tag this cycle. A remote-session's tag is presented at most once
+    // per lifetime (until the remote's state file is evicted from
+    // remote_sessions), so a `/loop` cycling Done→Working→Done won't repeat
+    // the bell. Not gated on active tab — the remote isn't tied to any local
+    // tab.
+    let remote_pending_raw = state.beep_remote_pending;
+    let remote_beep = state.settings.beep.beeps_remote() && state.beep_remote_pending;
+    state.beep_remote_pending = false;
+    if local_beep || remote_beep {
+        // Don't push '\x07' into the status-bar buffer — Zellij's grid parser
+        // would consume it. Shell out instead so the bell reaches the host
+        // pty (and through SSH to the user's terminal emulator).
+        state.ring_terminal_bell();
+        state.log(
+            LogLevel::Info,
+            &format!(
+                "render: BEL emitted (local={} remote={} beep_setting={:?})",
+                local_beep, remote_beep, state.settings.beep
+            ),
+        );
+    } else if remote_pending_raw {
+        state.log(
+            LogLevel::Debug,
+            &format!(
+                "render: cross-session beep pending but suppressed by beep_setting={:?}",
+                state.settings.beep
+            ),
+        );
+    } else if local_beep_candidate {
+        state.log(
+            LogLevel::Trace,
+            &format!(
+                "render: {} local beep_pending entries but none on active tab (idx={:?})",
+                local_pending_count, state.active_tab_index
+            ),
+        );
+    }
     // Terminal setup for a 1-row status bar:
     //  \x1b[H     — cursor home (prevent scroll from cursor at end-of-line)
     //  \x1b[?7l   — disable auto-wrap (clip overflow instead of scroll)
@@ -151,7 +251,11 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     };
     let prefix_text = format!(" Zellaude{session_part} ");
     let prefix_width = display_width(&prefix_text);
-    let mode_pill_width = if show_mode { 1 + mode_text.len() + 1 } else { 0 };
+    let mode_pill_width = if show_mode {
+        1 + mode_text.len() + 1
+    } else {
+        0
+    };
     let total_prefix_width = prefix_width + mode_pill_width;
 
     // Render prefix segment (truncate if wider than cols)
@@ -195,13 +299,18 @@ pub fn render_status_bar(state: &mut State, _rows: usize, cols: usize) {
     }
     state.prefix_click_region = Some((0, col));
 
-    let last_prefix_bg = if show_mode && total_prefix_width <= cols { mode_bg } else { prefix_bg };
+    let last_prefix_bg = if show_mode && total_prefix_width <= cols {
+        mode_bg
+    } else {
+        prefix_bg
+    };
     let prefix_used = col;
 
     if col < cols {
         match state.view_mode {
             ViewMode::Normal => {
                 render_tabs(state, &mut buf, &mut col, cols, last_prefix_bg, prefix_used);
+                render_remote_cluster(state, &mut buf, &mut col, cols);
             }
             ViewMode::Settings => {
                 arrow(&mut buf, &mut col, last_prefix_bg, BAR_BG);
@@ -307,7 +416,10 @@ fn render_tabs(
         let truncated = if max_name_len == 0 {
             String::new()
         } else if char_count > max_name_len {
-            let s: String = tab_name.chars().take(max_name_len.saturating_sub(1)).collect();
+            let s: String = tab_name
+                .chars()
+                .take(max_name_len.saturating_sub(1))
+                .collect();
             format!("{s}…")
         } else {
             tab_name.to_string()
@@ -455,6 +567,85 @@ fn render_tabs(
     }
 }
 
+fn render_remote_cluster(state: &mut State, buf: &mut String, col: &mut usize, cols: usize) {
+    let bar_bg_str = bg(BAR_BG.0, BAR_BG.1, BAR_BG.2);
+    let dim_red = fg(200, 100, 100);
+    let dim_green = fg(120, 200, 130);
+    let max_len = state.settings.cross_session_tag_max_len.max(1);
+    let cap = state.settings.max_cross_session_tags.max(1);
+
+    let total = state.remote_tag_order.len();
+    // Reserve room for the worst-case overflow chip up front so a narrow
+    // terminal doesn't drop both the tags AND the indicator. Since the actual
+    // chip text is `+{total - shown}` and shown ≤ cap, `total - shown` is at
+    // most `total` — using `format!(" +{total} ")` is an upper bound.
+    let chip_reserve = if total > cap {
+        format!(" +{total} ").len()
+    } else {
+        0
+    };
+    let tag_budget = cols.saturating_sub(chip_reserve);
+
+    let mut shown = 0usize;
+    let mut overflow_start = state.remote_tag_order.len();
+    for (idx, (session_name, kind)) in state.remote_tag_order.iter().enumerate() {
+        if shown >= cap {
+            overflow_start = idx;
+            break;
+        }
+        let Some(remote) = state.remote_sessions.get(session_name) else {
+            continue;
+        };
+        let name: String = remote.session_name.chars().take(max_len).collect();
+        // Layout: " ↗ <name> <icon> " — 6 fixed cols + name width.
+        let needed = 6 + display_width(&name);
+        if *col + needed >= tag_budget {
+            // Stop, but fall through so the overflow chip can still render
+            // within the reserved budget.
+            overflow_start = idx;
+            break;
+        }
+        let (chip_fg, icon) = match kind {
+            RemoteTagKind::Waiting => (&dim_red, "\u{26A0}"),
+            RemoteTagKind::Done => (&dim_green, "\u{2713}"),
+        };
+        let region_start = *col;
+        let _ = write!(buf, "{bar_bg_str}{chip_fg} \u{2197} {name} {icon} {RESET}");
+        *col += needed;
+        state.remote_tag_click_regions.push(RemoteTagClickRegion {
+            start_col: region_start,
+            end_col: *col,
+            session_name: session_name.clone(),
+            kind: *kind,
+        });
+        shown += 1;
+    }
+
+    if total > shown {
+        let overflow = total - shown;
+        let chip = format!(" +{overflow} ");
+        let needed = chip.len();
+        if *col + needed >= cols {
+            return;
+        }
+        // Escalate to the most urgent hidden kind: red if any Waiting is
+        // hidden, green otherwise. Avoids falsely implying hidden Waiting
+        // tags when only Done tags overflow.
+        let any_hidden_waiting = state
+            .remote_tag_order
+            .iter()
+            .skip(overflow_start)
+            .any(|(_, kind)| matches!(kind, RemoteTagKind::Waiting));
+        let chip_fg = if any_hidden_waiting {
+            &dim_red
+        } else {
+            &dim_green
+        };
+        let _ = write!(buf, "{bar_bg_str}{chip_fg}{chip}{RESET}");
+        *col += needed;
+    }
+}
+
 fn notify_mode_label(mode: NotifyMode) -> (&'static str, &'static str, String, String) {
     match mode {
         NotifyMode::Always => ("●", "Notify: always", fg(80, 200, 120), fg(255, 255, 255)),
@@ -506,8 +697,14 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         let (symbol, label, sym_color, label_color) =
             notify_mode_label(state.settings.notifications);
         render_tristate(
-            buf, col, &mut state.menu_click_regions,
-            SettingKey::Notifications, symbol, label, &sym_color, &label_color,
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::Notifications,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
         );
     }
 
@@ -515,11 +712,16 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
     {
         let _ = write!(buf, "  ");
         *col += 2;
-        let (symbol, label, sym_color, label_color) =
-            flash_mode_label(state.settings.flash);
+        let (symbol, label, sym_color, label_color) = flash_mode_label(state.settings.flash);
         render_tristate(
-            buf, col, &mut state.menu_click_regions,
-            SettingKey::Flash, symbol, label, &sym_color, &label_color,
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::Flash,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
         );
     }
 
@@ -533,10 +735,20 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         } else {
             ("○", fg(100, 100, 100), fg(100, 100, 100))
         };
-        let label = if enabled { "Elapsed time: on" } else { "Elapsed time: off" };
+        let label = if enabled {
+            "Elapsed time: on"
+        } else {
+            "Elapsed time: off"
+        };
         render_tristate(
-            buf, col, &mut state.menu_click_regions,
-            SettingKey::ElapsedTime, symbol, label, &sym_color, &label_color,
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::ElapsedTime,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
         );
     }
 
@@ -550,10 +762,123 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         } else {
             ("○", fg(100, 100, 100), fg(100, 100, 100))
         };
-        let label = if enabled { "Mode indicator: on" } else { "Mode indicator: off" };
+        let label = if enabled {
+            "Mode indicator: on"
+        } else {
+            "Mode indicator: off"
+        };
         render_tristate(
-            buf, col, &mut state.menu_click_regions,
-            SettingKey::ModeIndicator, symbol, label, &sym_color, &label_color,
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::ModeIndicator,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
+        );
+    }
+
+    // --- Beep (tristate: On / CrossSession / Off) ---
+    {
+        let _ = write!(buf, "  ");
+        *col += 2;
+        let (symbol, sym_color, label_color, label) = match state.settings.beep {
+            BeepMode::On => ("●", fg(80, 200, 120), fg(255, 255, 255), "Beep: on"),
+            BeepMode::CrossSession => (
+                "◐",
+                fg(80, 200, 120),
+                fg(255, 255, 255),
+                "Beep: cross-session",
+            ),
+            BeepMode::Off => ("○", fg(100, 100, 100), fg(100, 100, 100), "Beep: off"),
+        };
+        render_tristate(
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::Beep,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
+        );
+    }
+
+    // --- Persist cross-session tags (bool) ---
+    {
+        let _ = write!(buf, "  ");
+        *col += 2;
+        let enabled = state.settings.persist_cross_session_tags;
+        let (symbol, sym_color, label_color) = if enabled {
+            ("●", fg(80, 200, 120), fg(255, 255, 255))
+        } else {
+            ("○", fg(100, 100, 100), fg(100, 100, 100))
+        };
+        let label = if enabled {
+            "Persist tags: on"
+        } else {
+            "Persist tags: off"
+        };
+        render_tristate(
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::PersistCrossSessionTags,
+            symbol,
+            label,
+            &sym_color,
+            &label_color,
+        );
+    }
+
+    // --- Max cross-session tags (cycler 1→2→3→4→1) ---
+    {
+        let _ = write!(buf, "  ");
+        *col += 2;
+        let n = state.settings.max_cross_session_tags.max(1);
+        let symbol = "◆";
+        let sym_color = fg(80, 200, 120);
+        let label_color = fg(255, 255, 255);
+        let label = format!("Max tags: {n}");
+        render_tristate(
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::MaxCrossSessionTags,
+            symbol,
+            &label,
+            &sym_color,
+            &label_color,
+        );
+    }
+
+    // --- Log level (cycler off→error→warn→info→debug→trace→off) ---
+    {
+        let _ = write!(buf, "  ");
+        *col += 2;
+        let level = state.settings.log_level;
+        let symbol = if level == LogLevel::Off { "○" } else { "◆" };
+        let sym_color = if level == LogLevel::Off {
+            fg(100, 100, 100)
+        } else {
+            fg(255, 180, 60)
+        };
+        let label_color = if level == LogLevel::Off {
+            fg(100, 100, 100)
+        } else {
+            fg(255, 255, 255)
+        };
+        let label = format!("Log: {}", level.label());
+        render_tristate(
+            buf,
+            col,
+            &mut state.menu_click_regions,
+            SettingKey::LogLevel,
+            symbol,
+            &label,
+            &sym_color,
+            &label_color,
         );
     }
 
