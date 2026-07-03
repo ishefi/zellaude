@@ -143,16 +143,21 @@ fi
 # PreToolUse is intentionally excluded: it fires before the prompt is shown.
 case "$HOOK_EVENT" in
   PostToolUse|PostToolUseFailure|UserPromptSubmit|Stop|SessionEnd)
-    case "$(uname)" in
-      Darwin)
-        if command -v terminal-notifier >/dev/null 2>&1; then
-          terminal-notifier -remove "zellaude-permission-${ZELLIJ_PANE_ID}" >/dev/null 2>&1
-        fi
-        ;;
-      # Linux: notify-send offers no group-remove; left for a follow-up.
-    esac
-    # Reset the rate-limit so the next request can notify without the 10s delay.
-    rm -f "/tmp/zellaude-notify-${ZELLIJ_PANE_ID}" 2>/dev/null || true
+    # The rate-limit lock doubles as a "notification posted" marker: only
+    # spawn the dismiss (and reset the rate-limit) when one may be on screen.
+    LOCK="/tmp/zellaude-notify-${ZELLIJ_PANE_ID}"
+    if [ -f "$LOCK" ]; then
+      case "$(uname)" in
+        Darwin)
+          if command -v terminal-notifier >/dev/null 2>&1; then
+            terminal-notifier -remove "zellaude-permission-${ZELLIJ_PANE_ID}" >/dev/null 2>&1
+          fi
+          ;;
+        # Linux: notify-send offers no group-remove; left for a follow-up.
+      esac
+      # Reset the rate-limit so the next request can notify without the 10s delay.
+      rm -f "$LOCK"
+    fi
     ;;
 esac
 
