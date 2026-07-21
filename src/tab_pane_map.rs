@@ -26,3 +26,17 @@ pub fn build_pane_to_tab_map(
     }
     map
 }
+
+/// Build a mapping from terminal pane_id -> the pane's current title (the OSC
+/// title set by the running program, as it appears in the UI).
+pub fn build_pane_titles(manifest: &PaneManifest) -> HashMap<u32, String> {
+    let mut map = HashMap::new();
+    for panes in manifest.panes.values() {
+        for pane in panes {
+            if !pane.is_plugin {
+                map.insert(pane.id, pane.title.clone());
+            }
+        }
+    }
+    map
+}

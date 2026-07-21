@@ -557,6 +557,23 @@ fn render_settings_menu(state: &mut State, buf: &mut String, col: &mut usize) {
         );
     }
 
+    // --- Tab titles (bool) ---
+    {
+        let _ = write!(buf, "  ");
+        *col += 2;
+        let enabled = state.settings.tab_titles;
+        let (symbol, sym_color, label_color) = if enabled {
+            ("●", fg(80, 200, 120), fg(255, 255, 255))
+        } else {
+            ("○", fg(100, 100, 100), fg(100, 100, 100))
+        };
+        let label = if enabled { "Tab titles: on" } else { "Tab titles: off" };
+        render_tristate(
+            buf, col, &mut state.menu_click_regions,
+            SettingKey::TabTitles, symbol, label, &sym_color, &label_color,
+        );
+    }
+
     // Close button
     let _ = write!(buf, "  ");
     *col += 2;

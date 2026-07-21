@@ -108,6 +108,7 @@ pub struct Settings {
     pub flash: FlashMode,
     pub elapsed_time: bool,
     pub mode_indicator: bool,
+    pub tab_titles: bool,
 }
 
 impl Default for Settings {
@@ -117,6 +118,7 @@ impl Default for Settings {
             flash: FlashMode::Once,
             elapsed_time: true,
             mode_indicator: true,
+            tab_titles: false,
         }
     }
 }
@@ -134,8 +136,10 @@ pub enum SettingKey {
     Flash,
     ElapsedTime,
     ModeIndicator,
+    TabTitles,
 }
 
+#[derive(Clone, Copy)]
 pub enum MenuAction {
     ToggleSetting(SettingKey),
     CloseMenu,
