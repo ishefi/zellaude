@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
 use zellij_tile::prelude::*;
 
+use crate::palette::{Color, Palette, PaletteRole, ThemeSource};
+
 pub fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -166,4 +168,12 @@ pub struct State {
     pub menu_click_regions: Vec<MenuClickRegion>,
     pub config_loaded: bool,
     pub hooks_installed: bool,
+    /// The resolved palette that `render.rs` reads.
+    pub palette: Palette,
+    /// Where the base palette comes from (built-in or the Zellij theme).
+    pub theme_source: ThemeSource,
+    /// Per-role overrides parsed from the plugin config at load time.
+    pub palette_overrides: Vec<(PaletteRole, Color)>,
+    /// The most recent Zellij theme seen via `ModeUpdate`.
+    pub host_styling: Option<Styling>,
 }

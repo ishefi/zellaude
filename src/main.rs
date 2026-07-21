@@ -1,9 +1,12 @@
 mod event_handler;
+#[cfg(not(test))]
 mod installer;
+mod palette;
 mod render;
 mod state;
 mod tab_pane_map;
 
+use palette::{Palette, ThemeSource};
 use state::{unix_now, unix_now_ms, HookPayload, MenuAction, SessionInfo, Settings, State, ViewMode};
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
@@ -12,10 +15,12 @@ const DONE_TIMEOUT: u64 = 30;
 const TIMER_INTERVAL: f64 = 1.0;
 const FLASH_TICK: f64 = 0.25;
 
+#[cfg(not(test))]
 register_plugin!(State);
 
+#[cfg(not(test))]
 impl ZellijPlugin for State {
-    fn load(&mut self, _configuration: BTreeMap<String, String>) {
+    fn load(&mut self, configuration: BTreeMap<String, String>) {
         request_permission(&[
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
@@ -33,6 +38,14 @@ impl ZellijPlugin for State {
             EventType::PermissionRequestResult,
         ]);
         set_timeout(TIMER_INTERVAL);
+
+        // Parse color configuration from the KDL plugin block and resolve the
+        // initial palette (theme overlay is applied later on the first
+        // ModeUpdate, then re-resolved).
+        let (theme_source, overrides) = palette::parse_config(&configuration);
+        self.theme_source = theme_source;
+        self.palette_overrides = overrides;
+        self.recompute_palette();
 
         // Load persisted settings (may be retried in PermissionRequestResult
         // if this fires before permissions are granted)
@@ -64,6 +77,8 @@ impl ZellijPlugin for State {
                 if let Some(name) = mode_info.session_name {
                     self.zellij_session_name = Some(name);
                 }
+                self.host_styling = Some(mode_info.style.colors);
+                self.recompute_palette();
                 true
             }
             Event::Mouse(Mouse::LeftClick(_, col)) => {
@@ -240,6 +255,19 @@ impl ZellijPlugin for State {
 }
 
 impl State {
+    /// Rebuild the resolved palette: built-in defaults, then the Zellij theme
+    /// (if selected), then explicit overrides.
+    pub fn recompute_palette(&mut self) {
+        let mut p = Palette::default();
+        if self.theme_source == ThemeSource::Zellij {
+            if let Some(styling) = self.host_styling {
+                palette::apply_theme(&mut p, &styling);
+            }
+        }
+        palette::apply_overrides(&mut p, &self.palette_overrides);
+        self.palette = p;
+    }
+
     fn rebuild_pane_map(&mut self) {
         if let Some(ref manifest) = self.pane_manifest {
             self.pane_to_tab = tab_pane_map::build_pane_to_tab_map(&self.tabs, manifest);
@@ -314,10 +342,12 @@ impl State {
         })
     }
 
+    #[cfg(not(test))]
     fn request_sync(&self) {
         pipe_message_to_plugin(MessageToPlugin::new("zellaude:request"));
     }
 
+    #[cfg(not(test))]
     fn broadcast_sessions(&self) {
         let mut msg = MessageToPlugin::new("zellaude:sync");
         msg.message_payload =
@@ -325,6 +355,7 @@ impl State {
         pipe_message_to_plugin(msg);
     }
 
+    #[cfg(not(test))]
     fn broadcast_settings(&self) {
         let mut msg = MessageToPlugin::new("zellaude:settings");
         msg.message_payload =
@@ -332,6 +363,7 @@ impl State {
         pipe_message_to_plugin(msg);
     }
 
+    #[cfg(not(test))]
     fn load_config(&self) {
         let mut ctx = BTreeMap::new();
         ctx.insert("type".into(), "load_config".into());
@@ -345,6 +377,7 @@ impl State {
         );
     }
 
+    #[cfg(not(test))]
     fn save_config(&self) {
         if !self.config_loaded {
             return;
