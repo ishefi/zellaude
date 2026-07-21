@@ -114,7 +114,24 @@ if [ "$HOOK_EVENT" = "PermissionRequest" ]; then
 
       case "$(uname)" in
         Darwin)
-          [ -n "${TERM_PROGRAM:-}" ] && FOCUS_CMD="open -a '${TERM_PROGRAM}' && ${FOCUS_CMD}"
+          # Determine which terminal app to raise to the foreground. zellij does
+          # not always propagate TERM_PROGRAM into panes (it's unset in some
+          # launch contexts), so fall back to detecting the app from $TERM.
+          # Without raising the window, a click only switches the zellij tab but
+          # never brings the terminal forward — looking like "nothing happened".
+          TERM_APP="${TERM_PROGRAM:-}"
+          case "$TERM_APP" in
+            Apple_Terminal) TERM_APP="Terminal" ;;
+            iTerm.app)      TERM_APP="iTerm" ;;
+          esac
+          if [ -z "$TERM_APP" ]; then
+            case "${TERM:-}" in
+              *ghostty*) TERM_APP="Ghostty" ;;
+              *kitty*)   TERM_APP="kitty" ;;
+              *wezterm*) TERM_APP="WezTerm" ;;
+            esac
+          fi
+          [ -n "$TERM_APP" ] && FOCUS_CMD="open -a '${TERM_APP}' && ${FOCUS_CMD}"
           if command -v terminal-notifier >/dev/null 2>&1; then
             terminal-notifier \
               -title "$TITLE" \
