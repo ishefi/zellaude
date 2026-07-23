@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# install-hooks.sh — Add zellaude hook entries to ~/.claude/settings.json
+# install-hooks.sh — Add zellaude hook entries to Claude Code's settings.json
+# (${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json)
 #
 # Usage: ./scripts/install-hooks.sh [--uninstall]
 set -euo pipefail
 
-SETTINGS="$HOME/.claude/settings.json"
+SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 HOOK_SCRIPT="$(cd "$(dirname "$0")" && pwd)/zellaude-hook.sh"
 HOOK_CMD='${HOME}/.config/zellij/plugins/zellaude-hook.sh'
 

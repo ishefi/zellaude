@@ -18,7 +18,7 @@ fn hook_script_content() -> String {
 const INSTALL_TEMPLATE: &str = r##"set -e
 HOOK_PATH="$HOME/.config/zellij/plugins/zellaude-hook.sh"
 HOOK_CMD='${HOME}/.config/zellij/plugins/zellaude-hook.sh'
-SETTINGS="$HOME/.claude/settings.json"
+SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 
 resolve_file_symlink() {
   path=$1
@@ -61,7 +61,7 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 if [ ! -f "$SETTINGS" ]; then
-  mkdir -p "$HOME/.claude"
+  mkdir -p "$(dirname "$SETTINGS")"
   echo '{}' > "$SETTINGS"
 fi
 
